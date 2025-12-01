@@ -1,0 +1,38 @@
+name: Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Homebrew
+        id: set-up-homebrew
+        uses: Homebrew/actions/setup-homebrew@master
+
+      - name: Install yaskkserv2 HEAD
+        run: |
+          brew tap delphinus/yaskkserv2 "$GITHUB_WORKSPACE"
+          brew install --HEAD yaskkserv2
+
+      - name: Verify installation
+        run: |
+          which yaskkserv2
+          which yaskkserv2_make_dictionary
+          yaskkserv2 --version
+          yaskkserv2_make_dictionary --help
+
+      - name: Test formula
+        run: |
+          brew test yaskkserv2
+
+      - name: Audit formula
+        run: |
+          brew audit --strict yaskkserv2
