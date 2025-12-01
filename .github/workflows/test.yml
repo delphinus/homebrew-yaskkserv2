@@ -19,8 +19,7 @@ jobs:
 
       - name: Install yaskkserv2 HEAD
         run: |
-          brew tap delphinus/yaskkserv2 "$GITHUB_WORKSPACE"
-          brew install --HEAD yaskkserv2
+          brew install --HEAD --build-from-source --verbose yaskkserv2.rb
 
       - name: Verify installation
         run: |
@@ -31,8 +30,8 @@ jobs:
 
       - name: Test formula
         run: |
-          brew test yaskkserv2
+          brew test yaskkserv2.rb
 
       - name: Audit formula
         run: |
-          brew audit --strict yaskkserv2
+          brew audit --strict yaskkserv2.rb
