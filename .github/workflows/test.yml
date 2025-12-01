@@ -17,9 +17,14 @@ jobs:
         id: set-up-homebrew
         uses: Homebrew/actions/setup-homebrew@master
 
+      - name: Setup tap
+        run: |
+          mkdir -p $(brew --repo)/Library/Taps/delphinus
+          ln -s $GITHUB_WORKSPACE $(brew --repo)/Library/Taps/delphinus/homebrew-yaskkserv2
+
       - name: Install yaskkserv2 HEAD
         run: |
-          brew install --HEAD --build-from-source --verbose yaskkserv2.rb
+          brew install --HEAD --build-from-source --verbose yaskkserv2
 
       - name: Verify installation
         run: |
@@ -30,8 +35,8 @@ jobs:
 
       - name: Test formula
         run: |
-          brew test yaskkserv2.rb
+          brew test yaskkserv2
 
       - name: Audit formula
         run: |
-          brew audit --strict yaskkserv2.rb
+          brew audit --strict yaskkserv2
