@@ -3,7 +3,7 @@ class Yaskkserv2 < Formula
   homepage "https://github.com/wachikun/yaskkserv2"
   url "https://github.com/wachikun/yaskkserv2/archive/refs/tags/0.1.7.tar.gz"
   sha256 "93831cd32cd60bf946fbfef988b85c288105134a9a3ac46cf82f0e18babd1d4b"
-  license "Apache-2.0 OR MIT"
+  license any_of: ["Apache-2.0", "MIT"]
   head "https://github.com/wachikun/yaskkserv2.git", branch: "master"
 
   depends_on "rust" => :build
