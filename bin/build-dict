@@ -1,0 +1,239 @@
+#!/usr/bin/env bash
+# yaskkserv2 のシステム辞書 (dictionary.yaskkserv2) を上流に追従して再構築する。
+#
+# 上流の SKK 辞書群を取得 → 一時ファイルにビルド → 原子的差し替え → 変化時のみ
+# yaskkserv2 サービスを再起動する。launchd から日次で呼ばれることを想定。
+#
+# AquaSKK の HTTP 辞書自動更新 (SKKHttpDictionaryLoader) を置き換えるもの。
+# 個人学習辞書 (delphinus/skk-jisyo) とは別系統 — こちらは公開システム辞書専用。
+#
+# 使い方:
+#   bin/build-dict           通常実行 (上流に変化があったときだけ再構築)
+#   bin/build-dict --force   変化の有無にかかわらず再構築する
+
+set -euo pipefail
+
+# --- 設定 ---------------------------------------------------------------
+
+PREFIX="$(brew --prefix)"
+VAR="$PREFIX/var/yaskkserv2"
+SRC="$VAR/sources"                       # 上流クローンのキャッシュ (このスクリプトが管理)
+DICT="$VAR/dictionary.yaskkserv2"        # yaskkserv2 が読む辞書 (出力)
+LOCK="$VAR/.build-dict.lock"
+IDLE_THRESHOLD_SEC="${YASKK_BUILD_IDLE_THRESHOLD_SEC:-60}"
+
+JAWIKI_URL="https://github.com/tokuhirom/jawiki-kana-kanji-dict/releases/latest/download/SKK-JISYO.jawiki"
+JAWIKI_FILE="$SRC/SKK-JISYO.jawiki"
+JAWIKI_ETAG="$SRC/.jawiki.etag"
+
+# git ソース: "ローカルディレクトリ名|clone URL"
+GIT_SOURCES=(
+    "dict|https://github.com/skk-dev/dict"
+    "emoji|https://github.com/uasi/skk-emoji-jisyo"
+    "emoji-ja|https://github.com/ymrl/SKK-JISYO.emoji-ja"
+    "wiktionary|https://github.com/KeenS/SKK_JISYO.wiktionary"
+)
+
+# ビルド対象ファイル ($SRC からの相対パス)。
+# 順序はユーザの手動 yaskkserv2_make_dictionary コマンドと一致させること。
+JISYO_FILES=(
+    "dict/SKK-JISYO.assoc"
+    "dict/SKK-JISYO.china_taiwan"
+    "dict/SKK-JISYO.edict"
+    "emoji-ja/SKK-JISYO.emoji-ja.utf8"
+    "emoji/SKK-JISYO.emoji.utf8"
+    "dict/SKK-JISYO.fullname"
+    "dict/SKK-JISYO.geo"
+    "dict/SKK-JISYO.itaiji"
+    "dict/SKK-JISYO.itaiji.JIS3_4"
+    "SKK-JISYO.jawiki"
+    "dict/SKK-JISYO.jinmei"
+    "dict/SKK-JISYO.JIS2"
+    "dict/SKK-JISYO.JIS3_4"
+    "dict/SKK-JISYO.JIS2004"
+    "dict/SKK-JISYO.L"
+    "dict/SKK-JISYO.law"
+    "dict/SKK-JISYO.mazegaki"
+    "dict/zipcode/SKK-JISYO.office.zipcode"
+    "dict/SKK-JISYO.okinawa"
+    "dict/SKK-JISYO.propernoun"
+    "dict/SKK-JISYO.station"
+    "dict/zipcode/SKK-JISYO.zipcode"
+    "wiktionary/SKK_JISYO.shikakugoma"
+)
+
+# --- ユーティリティ -----------------------------------------------------
+
+log() { printf '%s %s\n' "$(/bin/date -Iseconds)" "$*" >&2; }
+die() { log "ERROR: $*"; exit 1; }
+
+FORCE=0
+[[ "${1:-}" == "--force" ]] && FORCE=1
+
+CHANGED=0   # いずれかの上流が更新されたら 1
+
+# --- 単一インスタンスロック ---------------------------------------------
+
+mkdir -p "$VAR" "$SRC"
+if ! mkdir "$LOCK" 2>/dev/null; then
+    log "another instance is running (lock: $LOCK); exiting"
+    exit 0
+fi
+trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+
+# --- アイドルチェック (--force 時はスキップ) -----------------------------
+# 入力中にサービスを再起動して取りこぼすのを避ける。再起動は「変化時のみ」なので緩め。
+
+if (( ! FORCE )) && (( IDLE_THRESHOLD_SEC > 0 )); then
+    ioreg_out=$(/usr/sbin/ioreg -c IOHIDSystem)
+    idle_ns=$(printf '%s\n' "$ioreg_out" | /usr/bin/awk '/HIDIdleTime/ {print $NF; exit}')
+    idle_sec=$(( ${idle_ns:-0} / 1000000000 ))
+    if (( idle_sec < IDLE_THRESHOLD_SEC )); then
+        log "active (idle=${idle_sec}s < ${IDLE_THRESHOLD_SEC}s); skipping"
+        exit 0
+    fi
+fi
+
+# --- 必須コマンド -------------------------------------------------------
+
+command -v yaskkserv2_make_dictionary >/dev/null || die "yaskkserv2_make_dictionary not found in PATH"
+command -v git >/dev/null || die "git not found in PATH"
+command -v curl >/dev/null || die "curl not found in PATH"
+
+# --- git ソースの更新 ---------------------------------------------------
+
+update_git() {
+    local name="$1" url="$2"
+    local dir="$SRC/$name"
+    if [[ -d "$dir/.git" ]]; then
+        local before after branch
+        before=$(git -C "$dir" rev-parse HEAD 2>/dev/null || echo none)
+        branch=$(git -C "$dir" symbolic-ref --short HEAD 2>/dev/null || echo master)
+        if git -C "$dir" fetch --depth 1 --quiet origin "$branch" 2>/dev/null; then
+            git -C "$dir" reset --hard --quiet FETCH_HEAD
+            after=$(git -C "$dir" rev-parse HEAD)
+            if [[ "$before" != "$after" ]]; then
+                CHANGED=1
+                log "updated: $name ($before -> $after)"
+            fi
+        else
+            log "WARN: fetch failed for $name; using existing checkout"
+        fi
+    else
+        rm -rf "$dir"
+        log "cloning: $name from $url"
+        git clone --depth 1 --quiet "$url" "$dir" || die "clone failed: $url"
+        CHANGED=1
+    fi
+}
+
+for entry in "${GIT_SOURCES[@]}"; do
+    update_git "${entry%%|*}" "${entry#*|}"
+done
+
+# --- jawiki (GitHub Releases, ETag 条件付き取得) -------------------------
+
+# ファイルが無いのに etag だけ残っていると 304 で取り損ねるので、その場合は etag を捨てる。
+[[ -f "$JAWIKI_FILE" ]] || rm -f "$JAWIKI_ETAG"
+jawiki_tmp="$(mktemp)"
+if curl -fsSL --etag-compare "$JAWIKI_ETAG" --etag-save "$JAWIKI_ETAG" \
+        -o "$jawiki_tmp" "$JAWIKI_URL"; then
+    if [[ -s "$jawiki_tmp" ]]; then
+        # GitHub Releases のリダイレクト先は ETag 条件付き GET を尊重しないことがあるため、
+        # 本文が返っても中身が同じなら無駄な再ビルドを避ける。
+        if [[ -f "$JAWIKI_FILE" ]] && cmp -s "$jawiki_tmp" "$JAWIKI_FILE"; then
+            rm -f "$jawiki_tmp"
+        else
+            mv -f "$jawiki_tmp" "$JAWIKI_FILE"
+            CHANGED=1
+            log "updated: SKK-JISYO.jawiki ($(wc -c <"$JAWIKI_FILE" | tr -d ' ') bytes)"
+        fi
+    else
+        rm -f "$jawiki_tmp"   # 304 Not Modified
+    fi
+else
+    rm -f "$jawiki_tmp"
+    log "WARN: jawiki download failed; using existing copy if present"
+fi
+
+# --- 変化判定 -----------------------------------------------------------
+
+[[ -f "$DICT" ]] || CHANGED=1   # 出力が無ければ必ずビルド
+if (( FORCE )); then
+    CHANGED=1
+fi
+if (( ! CHANGED )); then
+    log "no upstream change; skip rebuild"
+    exit 0
+fi
+
+# --- ビルド対象の存在確認 -----------------------------------------------
+
+build_args=()
+for rel in "${JISYO_FILES[@]}"; do
+    f="$SRC/$rel"
+    [[ -f "$f" ]] || die "expected jisyo missing: $f"
+    build_args+=("$f")
+done
+
+# --- 一時ファイルにビルド → 原子的差し替え ------------------------------
+
+tmp_dict="$(mktemp "$VAR/.dictionary.XXXXXX")"
+# yaskkserv2_make_dictionary は cache を出力辞書名 + ".cache" にも作るので一緒に掃除する
+cleanup_tmp() { rm -f "$tmp_dict" "$tmp_dict.cache"; }
+trap 'cleanup_tmp; rmdir "$LOCK" 2>/dev/null || true' EXIT
+
+log "building dictionary (${#build_args[@]} jisyo files)"
+if ! yaskkserv2_make_dictionary --utf8 --dictionary-filename="$tmp_dict" "${build_args[@]}"; then
+    die "yaskkserv2_make_dictionary failed; existing dictionary left intact"
+fi
+[[ -s "$tmp_dict" ]] || die "built dictionary is empty; aborting"
+
+mv -f "$tmp_dict" "$DICT"
+log "installed: $DICT ($(wc -c <"$DICT" | tr -d ' ') bytes)"
+
+# --- サービス再起動 -----------------------------------------------------
+# 原子的 mv では稼働中プロセスは古い inode を掴んだままなので、必ずプロセスを
+# 入れ替える必要がある。launchd 管理サービスには kickstart -k が確実
+# (brew services restart は state 不整合時に no-op になることがある)。
+
+listener_pid() { lsof -nP -iTCP:1178 -sTCP:LISTEN -t 2>/dev/null | head -1 || true; }
+
+restart_service() {
+    local label="homebrew.mxcl.yaskkserv2"
+    local domain="gui/$(id -u)"
+    local before after
+    before="$(listener_pid)"
+
+    launchctl kickstart -k "$domain/$label" >/dev/null 2>&1 \
+        || brew services restart yaskkserv2 >/dev/null 2>&1 || true
+    sleep 2
+    after="$(listener_pid)"
+
+    if [[ -n "$after" && "$after" != "$before" ]]; then
+        log "restarted yaskkserv2 (pid ${before:-none} -> $after)"
+        return
+    fi
+
+    # リスナー PID が変わっていない = 古い inode を掴んだまま、もしくは launchd 管理外の
+    # プロセスがポートを専有して新インスタンスが bind できていない。ポート専有プロセスを
+    # 落として keepalive に再生成させる (1178 を握っている当該 PID のみを対象)。
+    if [[ -n "$before" ]]; then
+        log "stale listener pid $before still bound; killing to force reload"
+        kill "$before" 2>/dev/null || true
+        sleep 1
+        launchctl kickstart "$domain/$label" >/dev/null 2>&1 \
+            || brew services start yaskkserv2 >/dev/null 2>&1 || true
+        sleep 2
+        after="$(listener_pid)"
+    fi
+
+    if [[ -n "$after" ]]; then
+        log "yaskkserv2 listening (pid $after)"
+    else
+        log "WARN: yaskkserv2 not listening after restart; check manually"
+    fi
+}
+restart_service
+
+log "build ok"
