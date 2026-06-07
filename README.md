@@ -100,7 +100,7 @@ tail -f $(brew --prefix)/var/log/yaskkserv2.log
 
 ## 辞書の更新
 
-辞書を更新したい場合は、手順2を再度実行してサービスを再起動してください：
+辞書を手動で更新したい場合は、手順2を再度実行してサービスを再起動してください：
 
 ```bash
 yaskkserv2_make_dictionary \
@@ -109,6 +109,54 @@ yaskkserv2_make_dictionary \
 
 brew services restart yaskkserv2
 ```
+
+## 辞書の自動更新
+
+複数の上流 SKK 辞書を取得して `dictionary.yaskkserv2` を再構築する処理を自動化する
+スクリプトを同梱しています。AquaSKK が HTTP で行っていた辞書の自動更新を置き換えるものです。
+
+各 Mac が上流を pull してローカルで再構築し (源辞書は git に持ちません)、変化があったときだけ
+辞書を原子的に差し替えてサービスを再起動します。
+
+### セットアップ
+
+```bash
+./bin/setup
+```
+
+これで以下が行われます (冪等):
+
+- 源辞書キャッシュ `$(brew --prefix)/var/yaskkserv2/sources/` の作成
+- LaunchAgent (`com.delphinus.yaskkserv2-dict`) を `~/Library/LaunchAgents/` にシンボリックリンクして登録 (日次 04:23 / スリープ中に逃した分は起床時に実行)
+- 初回ビルド (`bin/build-dict --force`)
+
+ログは `~/Library/Logs/yaskkserv2-dict.log` に出力されます。
+
+### 手動実行 / 停止
+
+```bash
+# 今すぐ再構築 (変化が無くても強制)
+./bin/build-dict --force
+
+# 自動更新を止める
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.delphinus.yaskkserv2-dict.plist
+```
+
+### 取り込む辞書
+
+`bin/build-dict` 冒頭の `GIT_SOURCES` / `JISYO_FILES` で管理しています。
+現在の取得元は以下のとおりです (`yaskkserv2_make_dictionary` は EUC-JP / UTF-8 をファイル単位で
+自動判別するため、エンコーディングの変換は不要です)。
+
+| 取得元 | 辞書 |
+| --- | --- |
+| [skk-dev/dict](https://github.com/skk-dev/dict) | L, jinmei, geo, propernoun, station, law, okinawa, assoc, edict, fullname, itaiji, itaiji.JIS3_4, JIS2, JIS3_4, JIS2004, mazegaki, china_taiwan, zipcode, office.zipcode |
+| [uasi/skk-emoji-jisyo](https://github.com/uasi/skk-emoji-jisyo) | emoji |
+| [ymrl/SKK-JISYO.emoji-ja](https://github.com/ymrl/SKK-JISYO.emoji-ja) | emoji-ja |
+| [KeenS/SKK_JISYO.wiktionary](https://github.com/KeenS/SKK_JISYO.wiktionary) | shikakugoma |
+| [tokuhirom/jawiki-kana-kanji-dict](https://github.com/tokuhirom/jawiki-kana-kanji-dict) | jawiki (GitHub Releases から取得) |
+
+辞書を追加・削除したい場合は `bin/build-dict` の該当配列を編集してください。
 
 ## Google 日本語入力との連携
 

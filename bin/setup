@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# yaskkserv2 辞書の自動更新をセットアップする。冪等 — 何度実行してもよい。
+#
+# 前提 (手動、マシンごとに 1 回):
+#   1. brew tap delphinus/yaskkserv2 && brew install --HEAD yaskkserv2
+#   2. このリポジトリを clone (例: ghq get git@github.com:delphinus/homebrew-yaskkserv2.git)
+#
+# 実行: ./bin/setup
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+LAUNCHD_LABEL="com.delphinus.yaskkserv2-dict"
+LAUNCHD_SRC="$REPO_ROOT/LaunchAgents/$LAUNCHD_LABEL.plist"
+LAUNCHD_DEST="$HOME/Library/LaunchAgents/$LAUNCHD_LABEL.plist"
+
+log() { printf '==> %s\n' "$*"; }
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# 1. 必須ツール
+log "checking tools"
+missing=()
+for cmd in brew git curl launchctl yaskkserv2_make_dictionary; do
+    have "$cmd" || missing+=("$cmd")
+done
+if (( ${#missing[@]} > 0 )); then
+    die "missing: ${missing[*]} — run: brew install --HEAD yaskkserv2"
+fi
+
+# 2. 源辞書キャッシュディレクトリ
+VAR="$(brew --prefix)/var/yaskkserv2"
+log "ensuring source cache dir: $VAR/sources"
+/bin/mkdir -p "$VAR/sources"
+
+# 3. plist が ProgramArguments に書いたパスと、この repo の実体が一致するか確認
+#    (clone 先が違うとパスがずれて動かないため)
+expected_bin="$REPO_ROOT/bin/build-dict"
+if ! /usr/bin/grep -q "$expected_bin" "$LAUNCHD_SRC"; then
+    log "WARN: $LAUNCHD_SRC の ProgramArguments がこの repo パスと一致しません。"
+    log "      想定: $expected_bin"
+    log "      plist 内のパスを修正してから再実行してください。"
+fi
+
+# 4. LaunchAgent をシンボリックリンク
+need_symlink=1
+if [[ -L "$LAUNCHD_DEST" && "$(readlink "$LAUNCHD_DEST")" == "$LAUNCHD_SRC" ]]; then
+    need_symlink=0
+fi
+if (( need_symlink )); then
+    log "linking LaunchAgent → $LAUNCHD_DEST"
+    /bin/ln -sfn "$LAUNCHD_SRC" "$LAUNCHD_DEST"
+else
+    log "LaunchAgent symlink: already in place (skipping)"
+fi
+
+# 5. launchd へ登録 (plist 変更を取り込むため毎回入れ直す)
+domain="gui/$(id -u)"
+if launchctl print "$domain/$LAUNCHD_LABEL" >/dev/null 2>&1; then
+    log "rebooting launchd job to pick up any plist changes"
+    launchctl bootout "$domain" "$LAUNCHD_DEST" 2>/dev/null || true
+fi
+log "bootstrapping launchd job"
+launchctl bootstrap "$domain" "$LAUNCHD_DEST"
+
+# 6. 初回ビルド
+log "running initial build (bin/build-dict --force)"
+"$REPO_ROOT/bin/build-dict" --force || die "initial build failed (see ~/Library/Logs/yaskkserv2-dict.log)"
+
+log "setup complete."
+log "  - sources:  $VAR/sources"
+log "  - dict:     $VAR/dictionary.yaskkserv2"
+log "  - launchd:  $LAUNCHD_LABEL (daily 04:23)"
+log "  - logs:     ~/Library/Logs/yaskkserv2-dict.log"
+log ""
+log "manual rebuild:  $REPO_ROOT/bin/build-dict --force"
+log "stop auto-update: launchctl bootout $domain $LAUNCHD_DEST"
