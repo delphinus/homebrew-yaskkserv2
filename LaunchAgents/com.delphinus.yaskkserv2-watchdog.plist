@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.delphinus.yaskkserv2-watchdog</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/jinnouchi.yasushi/git/github.com/delphinus/homebrew-yaskkserv2/bin/yaskkserv2-watchdog</string>
+    </array>
+
+    <!-- 60 秒ごとに健全性を確認。スリープ復帰後の hang を素早く拾う。
+         KeepAlive はプロセス終了でしか発火せず「生きたまま hang」を救えないため、
+         プロトコルレベルで応答を確かめるこの watchdog で補う。 -->
+    <key>StartInterval</key>
+    <integer>60</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>/Users/jinnouchi.yasushi</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jinnouchi.yasushi/Library/Logs/yaskkserv2-watchdog.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/jinnouchi.yasushi/Library/Logs/yaskkserv2-watchdog.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>LowPriorityIO</key>
+    <true/>
+
+    <key>Nice</key>
+    <integer>10</integer>
+</dict>
+</plist>

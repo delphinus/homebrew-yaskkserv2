@@ -128,6 +128,7 @@ brew services restart yaskkserv2
 
 - 源辞書キャッシュ `$(brew --prefix)/var/yaskkserv2/sources/` の作成
 - LaunchAgent (`com.delphinus.yaskkserv2-dict`) を `~/Library/LaunchAgents/` にシンボリックリンクして登録 (日次 04:23 / スリープ中に逃した分は起床時に実行)
+- LaunchAgent (`com.delphinus.yaskkserv2-watchdog`) を登録 (60 秒ごとに死活監視。下記参照)
 - 初回ビルド (`bin/build-dict --force`)
 
 ログは `~/Library/Logs/yaskkserv2-dict.log` に出力されます。
@@ -157,6 +158,45 @@ launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.delphinus.yaskkserv2-d
 | [tokuhirom/jawiki-kana-kanji-dict](https://github.com/tokuhirom/jawiki-kana-kanji-dict) | jawiki (GitHub Releases から取得) |
 
 辞書を追加・削除したい場合は `bin/build-dict` の該当配列を編集してください。
+
+## 死活監視 (watchdog)
+
+yaskkserv2 0.1.7 はシングルスレッドのブロッキング TCP サーバで、macOS のスリープ/復帰で
+ソケット syscall にハマると、**プロセスは生きていてポートも LISTEN しているのに、accept や
+応答だけが止まる** ことがあります。この「生きたまま hang」した状態は launchd の `KeepAlive`
+(プロセスが終了したときだけ再起動する) では復旧できず、SKK クライアント (skkeleton / Neovim
+など) が応答待ちのままフリーズします。
+
+`bin/yaskkserv2-watchdog` は SKK プロトコルで実際に `localhost:1178` へ問い合わせ、無応答なら
+プロセスを入れ替えて復旧します。`bin/setup` が LaunchAgent
+(`com.delphinus.yaskkserv2-watchdog`) として 60 秒ごとに実行するよう登録します。
+
+```bash
+# 今の状態を確認するだけ (復旧はしない。健全=0 / 異常=1 を返す)
+./bin/yaskkserv2-watchdog --check
+
+# 応答しなければその場で復旧する
+./bin/yaskkserv2-watchdog
+
+# 監視を止める
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.delphinus.yaskkserv2-watchdog.plist
+```
+
+ログは `~/Library/Logs/yaskkserv2-watchdog.log` に出力されます (健全なときは何も書きません)。
+
+### 補助: `--max-connections` の引き上げ
+
+hang の引き金は、デフォルトの接続上限 `--max-connections=16` が低いことです。yaskkserv2 には
+接続/アイドルタイムアウトが無いため、スリープ/復帰で切れた接続のスロットが解放されずに溜まり、
+16 個埋まると新規接続を accept 直後に切る (= 無応答) 状態に陥ります。Formula の `service` ブロックで
+上限を `1024` に引き上げ、飽和までの猶予を稼いでいます (watchdog が主防御、これは補助)。
+
+既存環境へ反映するには Formula を更新してサービスを再生成します:
+
+```bash
+brew update
+brew services restart yaskkserv2   # service ブロックから plist を再生成
+```
 
 ## Google 日本語入力との連携
 
