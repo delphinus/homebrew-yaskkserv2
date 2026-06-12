@@ -191,12 +191,18 @@ hang の引き金は、デフォルトの接続上限 `--max-connections=16` が
 16 個埋まると新規接続を accept 直後に切る (= 無応答) 状態に陥ります。Formula の `service` ブロックで
 上限を `1024` に引き上げ、飽和までの猶予を稼いでいます (watchdog が主防御、これは補助)。
 
-既存環境へ反映するには Formula を更新してサービスを再生成します:
+既存環境へ反映する手順。`brew services` は **インストール済み keg の formula 受信コピー**
+(`<Cellar>/yaskkserv2/<version>/.brew/yaskkserv2.rb`) の `service` ブロックから plist を生成する
+ため、tap を更新して `brew services restart` するだけでは反映されません。keg を作り直す
+`brew reinstall` が必要です:
 
 ```bash
 brew update
-brew services restart yaskkserv2   # service ブロックから plist を再生成
+brew reinstall yaskkserv2          # keg の formula 受信コピーを更新 (HEAD は再ビルド)
+brew services restart yaskkserv2   # 新しい引数で plist を再生成・再起動
 ```
+
+未インストールの環境では `brew install --HEAD yaskkserv2` で最初から反映されます。
 
 ## Google 日本語入力との連携
 
