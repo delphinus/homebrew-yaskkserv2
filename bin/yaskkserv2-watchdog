@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# yaskkserv2 が「生きているのに応答しない」状態を検知して復旧する。
+#
+# yaskkserv2 0.1.7 はシングルスレッドのブロッキング TCP サーバで、macOS の
+# スリープ/復帰でソケット syscall にハマると、プロセスは生存・ポートは LISTEN の
+# まま accept/応答だけ止まることがある。この hang は launchd の KeepAlive
+# (プロセス終了でしか発火しない) では復旧できず、SKK クライアント
+# (skkeleton/Neovim など) が応答待ちでフリーズする。
+#
+# そこで SKK プロトコルで実際に問い合わせ、無応答なら入れ替える。launchd から
+# StartInterval で定期実行されることを想定。
+#
+# 使い方:
+#   bin/yaskkserv2-watchdog          応答しなければ復旧する
+#   bin/yaskkserv2-watchdog --check  判定のみ (復旧しない。健全=0 / 異常=1)
+
+set -euo pipefail
+
+# --- 設定 ---------------------------------------------------------------
+
+PORT=1178
+TIMEOUT_SEC="${YASKK_WATCHDOG_TIMEOUT_SEC:-3}"   # 1 回の probe で応答を待つ秒数
+LABEL="homebrew.mxcl.yaskkserv2"                 # brew services 由来の launchd ラベル
+DOMAIN="gui/$(id -u)"
+LOCK="${TMPDIR:-/tmp}/.yaskkserv2-watchdog.lock"
+
+log() { printf '%s %s\n' "$(/bin/date -Iseconds)" "$*" >&2; }
+
+CHECK_ONLY=0
+[[ "${1:-}" == "--check" ]] && CHECK_ONLY=1
+
+# --- 健全性チェック -----------------------------------------------------
+
+listener_pid() { lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null | head -1 || true; }
+
+# SKK プロトコルでサーバに問い合わせる。"2" = バージョン要求 (健全なら "0.1.7 "
+# 等を返す)、続けて "0" = 切断要求を送り、応答待ちでこちらがブロックしないように
+# する。hang したサーバは接続は受けるが本文を一切返さない (空) ので、応答が
+# 空でなければ健全と判定する。
+probe() {
+    local resp
+    resp="$(printf '20' | nc -w "$TIMEOUT_SEC" 127.0.0.1 "$PORT" 2>/dev/null | head -c 64 || true)"
+    [[ -n "$resp" ]]
+}
+
+# 瞬間的なブリップで暴発しないよう、2 連続で失敗したときだけ不健全とみなす。
+healthy() { probe || { sleep 1; probe; }; }
+
+# --- 復旧 ---------------------------------------------------------------
+# build-dict の restart_service と同じ考え方。原子的な辞書差し替えではなく hang が
+# 相手なので、ポートを握ったまま離さないプロセスは SIGKILL まで上げて確実に倒す。
+
+restart() {
+    local before after
+    before="$(listener_pid)"
+
+    launchctl kickstart -k "$DOMAIN/$LABEL" >/dev/null 2>&1 \
+        || brew services restart yaskkserv2 >/dev/null 2>&1 || true
+    sleep 2
+    after="$(listener_pid)"
+    if [[ -n "$after" && "$after" != "$before" ]]; then
+        log "restarted yaskkserv2 (pid ${before:-none} -> $after)"
+        return
+    fi
+
+    # リスナー PID が変わっていない = hang プロセスが SIGTERM を取りこぼしてポートを
+    # 握ったまま、もしくは launchd 管理外のプロセスが 1178 を専有して新インスタンスが
+    # bind できていない。1178 を握っている当該 PID を倒して keepalive に再生成させる。
+    if [[ -n "$before" ]]; then
+        log "stale listener pid $before still bound; killing to force reload"
+        kill "$before" 2>/dev/null || true
+        sleep 1
+        if kill -0 "$before" 2>/dev/null; then
+            log "pid $before survived SIGTERM; escalating to SIGKILL"
+            kill -9 "$before" 2>/dev/null || true
+            sleep 1
+        fi
+        launchctl kickstart "$DOMAIN/$LABEL" >/dev/null 2>&1 \
+            || brew services start yaskkserv2 >/dev/null 2>&1 || true
+        sleep 2
+        after="$(listener_pid)"
+    fi
+
+    if [[ -n "$after" && "$after" != "$before" ]]; then
+        log "yaskkserv2 listening (pid $after)"
+    else
+        log "WARN: yaskkserv2 not healthy after restart; check manually"
+    fi
+}
+
+# --- メイン -------------------------------------------------------------
+
+if healthy; then
+    exit 0
+fi
+
+if (( CHECK_ONLY )); then
+    log "unhealthy: no response on :$PORT within ${TIMEOUT_SEC}s"
+    exit 1
+fi
+
+# 復旧の多重起動を防ぐ (probe が通れば即 exit するので競合はまれだが念のため)。
+if ! mkdir "$LOCK" 2>/dev/null; then
+    log "another watchdog run is recovering (lock: $LOCK); exiting"
+    exit 0
+fi
+trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+
+log "no response on :$PORT within ${TIMEOUT_SEC}s; restarting"
+restart
+
+sleep 1
+if healthy; then
+    log "recovered"
+else
+    log "WARN: still unhealthy after restart"
+fi

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# yaskkserv2 辞書の自動更新をセットアップする。冪等 — 何度実行してもよい。
+# yaskkserv2 の辞書自動更新と死活監視 (watchdog) をセットアップする。
+# 冪等 — 何度実行してもよい。
 #
 # 前提 (手動、マシンごとに 1 回):
 #   1. brew tap delphinus/yaskkserv2 && brew install --HEAD yaskkserv2
@@ -10,18 +11,46 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-LAUNCHD_LABEL="com.delphinus.yaskkserv2-dict"
-LAUNCHD_SRC="$REPO_ROOT/LaunchAgents/$LAUNCHD_LABEL.plist"
-LAUNCHD_DEST="$HOME/Library/LaunchAgents/$LAUNCHD_LABEL.plist"
+domain="gui/$(id -u)"
 
 log() { printf '==> %s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# LaunchAgent を symlink → launchd へ (再) 登録する。plist の ProgramArguments が
+# この repo の実体パスを指しているかも確認する (clone 先がずれると動かないため)。
+install_agent() {
+    local label="$1" expected_bin="$2"
+    local src="$REPO_ROOT/LaunchAgents/$label.plist"
+    local dest="$HOME/Library/LaunchAgents/$label.plist"
+
+    [[ -f "$src" ]] || die "plist not found: $src"
+    if ! /usr/bin/grep -q "$expected_bin" "$src"; then
+        log "WARN: $src の ProgramArguments がこの repo パスと一致しません。"
+        log "      想定: $expected_bin"
+        log "      plist 内のパスを修正してから再実行してください。"
+    fi
+
+    if [[ -L "$dest" && "$(readlink "$dest")" == "$src" ]]; then
+        log "$label: symlink already in place (skipping)"
+    else
+        log "$label: linking LaunchAgent → $dest"
+        /bin/ln -sfn "$src" "$dest"
+    fi
+
+    # plist 変更を取り込むため毎回入れ直す。
+    if launchctl print "$domain/$label" >/dev/null 2>&1; then
+        log "$label: rebooting launchd job to pick up any plist changes"
+        launchctl bootout "$domain" "$dest" 2>/dev/null || true
+    fi
+    log "$label: bootstrapping launchd job"
+    launchctl bootstrap "$domain" "$dest"
+}
+
 # 1. 必須ツール
 log "checking tools"
 missing=()
-for cmd in brew git curl launchctl yaskkserv2_make_dictionary; do
+for cmd in brew git curl launchctl nc yaskkserv2_make_dictionary; do
     have "$cmd" || missing+=("$cmd")
 done
 if (( ${#missing[@]} > 0 )); then
@@ -33,45 +62,25 @@ VAR="$(brew --prefix)/var/yaskkserv2"
 log "ensuring source cache dir: $VAR/sources"
 /bin/mkdir -p "$VAR/sources"
 
-# 3. plist が ProgramArguments に書いたパスと、この repo の実体が一致するか確認
-#    (clone 先が違うとパスがずれて動かないため)
-expected_bin="$REPO_ROOT/bin/build-dict"
-if ! /usr/bin/grep -q "$expected_bin" "$LAUNCHD_SRC"; then
-    log "WARN: $LAUNCHD_SRC の ProgramArguments がこの repo パスと一致しません。"
-    log "      想定: $expected_bin"
-    log "      plist 内のパスを修正してから再実行してください。"
-fi
+# 3. LaunchAgent を登録
+#    - dict:     上流 SKK 辞書を日次で再構築
+#    - watchdog: yaskkserv2 の死活を監視し、hang を検知したら再起動
+install_agent "com.delphinus.yaskkserv2-dict" "$REPO_ROOT/bin/build-dict"
+install_agent "com.delphinus.yaskkserv2-watchdog" "$REPO_ROOT/bin/yaskkserv2-watchdog"
 
-# 4. LaunchAgent をシンボリックリンク
-need_symlink=1
-if [[ -L "$LAUNCHD_DEST" && "$(readlink "$LAUNCHD_DEST")" == "$LAUNCHD_SRC" ]]; then
-    need_symlink=0
-fi
-if (( need_symlink )); then
-    log "linking LaunchAgent → $LAUNCHD_DEST"
-    /bin/ln -sfn "$LAUNCHD_SRC" "$LAUNCHD_DEST"
-else
-    log "LaunchAgent symlink: already in place (skipping)"
-fi
-
-# 5. launchd へ登録 (plist 変更を取り込むため毎回入れ直す)
-domain="gui/$(id -u)"
-if launchctl print "$domain/$LAUNCHD_LABEL" >/dev/null 2>&1; then
-    log "rebooting launchd job to pick up any plist changes"
-    launchctl bootout "$domain" "$LAUNCHD_DEST" 2>/dev/null || true
-fi
-log "bootstrapping launchd job"
-launchctl bootstrap "$domain" "$LAUNCHD_DEST"
-
-# 6. 初回ビルド
+# 4. 初回ビルド
 log "running initial build (bin/build-dict --force)"
 "$REPO_ROOT/bin/build-dict" --force || die "initial build failed (see ~/Library/Logs/yaskkserv2-dict.log)"
 
 log "setup complete."
 log "  - sources:  $VAR/sources"
 log "  - dict:     $VAR/dictionary.yaskkserv2"
-log "  - launchd:  $LAUNCHD_LABEL (daily 04:23)"
+log "  - launchd:  com.delphinus.yaskkserv2-dict (daily 04:23)"
+log "  - launchd:  com.delphinus.yaskkserv2-watchdog (every 60s)"
 log "  - logs:     ~/Library/Logs/yaskkserv2-dict.log"
+log "              ~/Library/Logs/yaskkserv2-watchdog.log"
 log ""
-log "manual rebuild:  $REPO_ROOT/bin/build-dict --force"
-log "stop auto-update: launchctl bootout $domain $LAUNCHD_DEST"
+log "manual rebuild:   $REPO_ROOT/bin/build-dict --force"
+log "manual healthchk: $REPO_ROOT/bin/yaskkserv2-watchdog --check"
+log "stop auto-update: launchctl bootout $domain ~/Library/LaunchAgents/com.delphinus.yaskkserv2-dict.plist"
+log "stop watchdog:    launchctl bootout $domain ~/Library/LaunchAgents/com.delphinus.yaskkserv2-watchdog.plist"
