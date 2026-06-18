@@ -22,9 +22,10 @@ class Yaskkserv2 < Formula
     # タイムアウトが無いため、スリープ/復帰で切れた接続のスロットが解放されずに
     # 溜まり、16 個埋まると新規接続を accept 直後に切る (= 無応答ハング) 状態に陥る。
     # 上限を上げて飽和までの猶予を稼ぐ (根治は bin/yaskkserv2-watchdog 側で行う)。
-    # --midashi-utf8: build-dict が --utf8 で UTF-8 辞書を作るため、サーバも UTF-8 で
-    # 見出しを送受信する必要がある (無いと EUC-JP ワイヤになり UTF-8 クライアントが化ける)。
-    run [opt_bin/"yaskkserv2", "--midashi-utf8", "--max-connections=1024", var/"yaskkserv2/dictionary.yaskkserv2"]
+    # NOTE: --midashi-utf8 は付けない。macSKK は見出しを常に EUC-JP で送るため、
+    # サーバは EUC-JP 見出しを受ける必要がある。辞書が --utf8 でも候補は UTF-8 で返るので、
+    # クライアント側を「見出し EUC-JP / 応答 UTF-8」にすれば macSKK・skkeleton 双方が動く。
+    run [opt_bin/"yaskkserv2", "--max-connections=1024", var/"yaskkserv2/dictionary.yaskkserv2"]
     keep_alive true
     log_path var/"log/yaskkserv2.log"
     error_log_path var/"log/yaskkserv2.log"
