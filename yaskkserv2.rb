@@ -25,7 +25,16 @@ class Yaskkserv2 < Formula
     # NOTE: --midashi-utf8 は付けない。macSKK は見出しを常に EUC-JP で送るため、
     # サーバは EUC-JP 見出しを受ける必要がある。辞書が --utf8 でも候補は UTF-8 で返るので、
     # クライアント側を「見出し EUC-JP / 応答 UTF-8」にすれば macSKK・skkeleton 双方が動く。
-    run [opt_bin/"yaskkserv2", "--max-connections=1024", var/"yaskkserv2/dictionary.yaskkserv2"]
+    # --google-cache-filename: 辞書に無い読みを Google 日本語入力へフォールバック
+    # (--google-japanese-input=notfound, デフォルト) した結果をキャッシュし、2 回目
+    # 以降の同じ読みはネット往復を省く。単一インスタンス運用なので排他制御は不要。
+    # 他の --google-* はデフォルトのまま (suggest off / HTTPS / timeout 1000ms など)。
+    run [
+      opt_bin/"yaskkserv2",
+      "--max-connections=1024",
+      "--google-cache-filename=#{var}/yaskkserv2/google.cache",
+      var/"yaskkserv2/dictionary.yaskkserv2",
+    ]
     keep_alive true
     log_path var/"log/yaskkserv2.log"
     error_log_path var/"log/yaskkserv2.log"

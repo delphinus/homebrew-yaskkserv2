@@ -216,6 +216,22 @@ yaskkserv2 \
 
 詳しいオプションは `yaskkserv2 --help` を参照してください。
 
+### キャッシュ (`--google-cache-filename`)
+
+`--google-japanese-input=notfound` のままだと、辞書に無い読みは毎回 Google API へ
+ネットワーク往復します。本 Formula の `service` ブロックでは
+`--google-cache-filename=$(brew --prefix)/var/yaskkserv2/google.cache` を付け、
+フォールバック結果をキャッシュして 2 回目以降の同じ読みの往復を省きます。
+
+キャッシュは無制限には増えません。書き込みのたびに次の二つで刈り込まれます:
+
+- `--google-cache-entries` (既定 1024): 件数上限。超過分は最古エントリから evict。
+- `--google-cache-expire-seconds` (既定 2592000 = 30 日): これより古いエントリは除去。
+
+ファイルは追記ではなくマップ全体の上書きなので、サイズは生存エントリ数 (最大 1024 件)
+に比例します。なお排他制御は無いため、yaskkserv2 を複数起動する場合はインスタンス
+ごとに別のキャッシュファイルを指定してください。
+
 ## アンインストール
 
 ```bash
