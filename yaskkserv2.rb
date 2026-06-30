@@ -22,6 +22,11 @@ class Yaskkserv2 < Formula
     # タイムアウトが無いため、スリープ/復帰で切れた接続のスロットが解放されずに
     # 溜まり、16 個埋まると新規接続を accept 直後に切る (= 無応答ハング) 状態に陥る。
     # 上限を上げて飽和までの猶予を稼ぐ (根治は bin/yaskkserv2-watchdog 側で行う)。
+    # --no-daemonize: yaskkserv2 はデフォルトで自己デーモン化する。launchd 配下では
+    # fork されると launchd が直接の子の終了を見て「停止」と判断し、fork された実体が
+    # orphan として port を握り続ける (KeepAlive が効かず、再起動時に古い orphan が
+    # port を握ったまま新インスタンスが bind できない)。フォアグラウンドで動かして
+    # launchd に PID を追跡させる。
     # --midashi-utf8: 見出しを UTF-8 で受け取る。クライアント側も見出しを UTF-8 で
     # 送る設定にしておくこと。
     # --google-cache-filename: 辞書に無い読みを Google 日本語入力へフォールバック
@@ -30,6 +35,7 @@ class Yaskkserv2 < Formula
     # 他の --google-* はデフォルトのまま (suggest off / HTTPS / timeout 1000ms など)。
     run [
       opt_bin/"yaskkserv2",
+      "--no-daemonize",
       "--max-connections=1024",
       "--midashi-utf8",
       "--google-cache-filename=#{var}/yaskkserv2/google.cache",
