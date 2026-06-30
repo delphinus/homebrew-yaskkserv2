@@ -22,9 +22,8 @@ class Yaskkserv2 < Formula
     # タイムアウトが無いため、スリープ/復帰で切れた接続のスロットが解放されずに
     # 溜まり、16 個埋まると新規接続を accept 直後に切る (= 無応答ハング) 状態に陥る。
     # 上限を上げて飽和までの猶予を稼ぐ (根治は bin/yaskkserv2-watchdog 側で行う)。
-    # NOTE: --midashi-utf8 は付けない。macSKK は見出しを常に EUC-JP で送るため、
-    # サーバは EUC-JP 見出しを受ける必要がある。辞書が --utf8 でも候補は UTF-8 で返るので、
-    # クライアント側を「見出し EUC-JP / 応答 UTF-8」にすれば macSKK・skkeleton 双方が動く。
+    # --midashi-utf8: 見出しを UTF-8 で受け取る。クライアント側も見出しを UTF-8 で
+    # 送る設定にしておくこと。
     # --google-cache-filename: 辞書に無い読みを Google 日本語入力へフォールバック
     # (--google-japanese-input=notfound, デフォルト) した結果をキャッシュし、2 回目
     # 以降の同じ読みはネット往復を省く。単一インスタンス運用なので排他制御は不要。
@@ -32,6 +31,7 @@ class Yaskkserv2 < Formula
     run [
       opt_bin/"yaskkserv2",
       "--max-connections=1024",
+      "--midashi-utf8",
       "--google-cache-filename=#{var}/yaskkserv2/google.cache",
       var/"yaskkserv2/dictionary.yaskkserv2",
     ]
