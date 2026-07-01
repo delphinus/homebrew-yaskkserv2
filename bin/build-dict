@@ -99,6 +99,7 @@ fi
 command -v yaskkserv2_make_dictionary >/dev/null || die "yaskkserv2_make_dictionary not found in PATH"
 command -v git >/dev/null || die "git not found in PATH"
 command -v curl >/dev/null || die "curl not found in PATH"
+command -v python3 >/dev/null || die "python3 not found in PATH"
 
 # --- git ソースの更新 ---------------------------------------------------
 
@@ -179,12 +180,24 @@ done
 # --- 一時ファイルにビルド → 原子的差し替え ------------------------------
 
 tmp_dict="$(mktemp "$VAR/.dictionary.XXXXXX")"
+norm_dir="$(mktemp -d "$VAR/.normalized.XXXXXX")"
 # yaskkserv2_make_dictionary は cache を出力辞書名 + ".cache" にも作るので一緒に掃除する
-cleanup_tmp() { rm -f "$tmp_dict" "$tmp_dict.cache"; }
+cleanup_tmp() { rm -f "$tmp_dict" "$tmp_dict.cache"; rm -rf "$norm_dir"; }
 trap 'cleanup_tmp; rmdir "$LOCK" 2>/dev/null || true' EXIT
 
-log "building dictionary (${#build_args[@]} jisyo files)"
-if ! yaskkserv2_make_dictionary --utf8 --dictionary-filename="$tmp_dict" "${build_args[@]}"; then
+# 見出しの "う゛" を "ゔ" に正規化 (UTF-8化) してからビルドする。EUC辞書 (SKK-JISYO.L等,
+# ヴ音を "う゛" で登録) と UTF-8辞書 (jawiki等, "ゔ" ネイティブ) の見出しを揃えるため。
+# 正規化コピーを元と同じ順序で make_dictionary に渡す。
+normalizer="$(dirname "${BASH_SOURCE[0]}")/normalize-jisyo"
+norm_args=()
+for idx in "${!build_args[@]}"; do
+    nf="$norm_dir/$idx.jisyo"
+    python3 "$normalizer" "${build_args[$idx]}" "$nf" || die "normalize failed: ${build_args[$idx]}"
+    norm_args+=("$nf")
+done
+
+log "building dictionary (${#norm_args[@]} jisyo files)"
+if ! yaskkserv2_make_dictionary --utf8 --dictionary-filename="$tmp_dict" "${norm_args[@]}"; then
     die "yaskkserv2_make_dictionary failed; existing dictionary left intact"
 fi
 [[ -s "$tmp_dict" ]] || die "built dictionary is empty; aborting"

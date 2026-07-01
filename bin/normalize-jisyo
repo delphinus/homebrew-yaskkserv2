@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+# SKK 辞書の見出しの "う゛" を "ゔ" (U+3094) に正規化する。
+#
+# EUC-JP (JIS X 0208) は "ゔ" を表現できないため、SKK-JISYO.L など EUC 由来の辞書は
+# ヴ音を "う゛" (U+3046 + U+309B、または結合形 U+3046 + U+3099) で登録している。一方
+# SKK-JISYO.jawiki など UTF-8 辞書は "ゔ" (U+3094) ネイティブ。両者を同じ辞書にすると
+# 見出しが揃わず、UTF-8 で "ゔ" を送るクライアント (macSKK / skkeleton) から "う゛"
+# 側の語が引けない。ここで見出しを "ゔ" に統一する。
+#
+# - 置換対象は見出し部分 (行の最初の " /" より前) のみ。候補・注釈内の "う゛" は変えない。
+# - 入力エンコーディングは自動判定 (UTF-8 strict → 失敗時 euc_jis_2004)。出力は常に UTF-8。
+# - コメント行 (";" 始まり) は coding ヘッダの euc-* を utf-8 に寄せるほかはそのまま通す。
+#
+# usage: normalize-jisyo INPUT OUTPUT
+import re
+import sys
+
+# "う" + 濁点 (spacing U+309B / combining U+3099) → "ゔ" (U+3094)
+_UDAKU = re.compile("う[゛゙]")
+# コメント内の coding 指定を UTF-8 に寄せる (make_dictionary が header で判定する場合の保険)
+_CODING = re.compile(r"coding:\s*euc[-\w]*", re.IGNORECASE)
+
+
+def decode(data: bytes) -> str:
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data.decode("euc_jis_2004")
+
+
+def process_line(line: str) -> str:
+    if line.startswith(";"):
+        return _CODING.sub("coding: utf-8", line)
+    idx = line.find(" /")
+    if idx < 0:
+        return line
+    return _UDAKU.sub("ゔ", line[:idx]) + line[idx:]
+
+
+def main() -> int:
+    if len(sys.argv) != 3:
+        sys.stderr.write("usage: normalize-jisyo INPUT OUTPUT\n")
+        return 2
+    with open(sys.argv[1], "rb") as f:
+        text = decode(f.read())
+    out = "\n".join(process_line(ln) for ln in text.split("\n"))
+    with open(sys.argv[2], "w", encoding="utf-8") as f:
+        f.write(out)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
