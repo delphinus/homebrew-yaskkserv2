@@ -1,9 +1,16 @@
 class Yaskkserv2 < Formula
   desc "Rust で書かれた高速な SKK 辞書サーバー"
   homepage "https://github.com/wachikun/yaskkserv2"
-  url "https://github.com/wachikun/yaskkserv2/archive/refs/tags/0.1.7.tar.gz"
-  sha256 "93831cd32cd60bf946fbfef988b85c288105134a9a3ac46cf82f0e18babd1d4b"
+  # リリース版 (0.1.7, 2023年9月) は古いため、master の特定コミットに固定して配布する。
+  # コミットを進めるときは url の sha・sha256・pinned commit コメントを更新し、revision を
+  # +1 する (upstream の Cargo バージョンは 0.1.7 のままなので、revision を上げないと
+  # brew upgrade がコミット差し替えを検知しない)。service ブロックだけ変えた場合も同様。
+  # pinned commit: f5bc4590c798c591e9861e02ea2e12d227a047ed (2026-07-01 時点の master HEAD)
+  url "https://github.com/wachikun/yaskkserv2/archive/f5bc4590c798c591e9861e02ea2e12d227a047ed.tar.gz"
+  version "0.1.7"
+  sha256 "942525683f6725475468af42d9387b650e443f207e00d10a909eb86110fbe946"
   license any_of: ["Apache-2.0", "MIT"]
+  revision 1
   head "https://github.com/wachikun/yaskkserv2.git", branch: "master"
 
   depends_on "rust" => :build
@@ -12,9 +19,9 @@ class Yaskkserv2 < Formula
     system "cargo", "install", *std_cargo_args
   end
 
-  def post_install
+  post_install_steps do
     # 辞書ディレクトリの作成
-    (var/"yaskkserv2").mkpath
+    mkdir_p "yaskkserv2"
   end
 
   service do
@@ -46,11 +53,6 @@ class Yaskkserv2 < Formula
     error_log_path var/"log/yaskkserv2.log"
   end
 
-  test do
-    system "#{bin}/yaskkserv2", "--version"
-    system "#{bin}/yaskkserv2_make_dictionary", "--help"
-  end
-
   def caveats
     <<~EOS
       yaskkserv2 を使用するには、まず辞書ファイルを作成する必要があります。
@@ -71,9 +73,15 @@ class Yaskkserv2 < Formula
 
       SKK クライアント（Emacs の ddskk など）からは localhost:1178 で接続できます。
 
-      注意: リリース版 (0.1.7) は 2023年9月と古いため、最新機能を使いたい場合は
-      HEAD インストールを推奨します:
+      注意: この Formula の stable は upstream master の特定コミットに固定されています
+      (リリース版 0.1.7 は 2023年9月と古いため)。常に最新の master を追いたい場合は
+      HEAD インストールも利用できます:
          brew install --HEAD yaskkserv2
     EOS
+  end
+
+  test do
+    system bin/"yaskkserv2", "--version"
+    system bin/"yaskkserv2_make_dictionary", "--help"
   end
 end
