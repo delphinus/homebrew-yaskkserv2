@@ -35,31 +35,42 @@ GIT_SOURCES=(
 )
 
 # ビルド対象ファイル ($SRC からの相対パス)。
-# 順序はユーザの手動 yaskkserv2_make_dictionary コマンドと一致させること。
+#
+# 【順序が候補の表示順を決める】yaskkserv2_make_dictionary は同じ見出しの候補を
+# 「与えたファイル順」に連結して重複排除する (先に出たファイルの候補が前に来る)。
+# そのため一般的・頻用の辞書を前に、稀用漢字・絵文字などマイナーな辞書を後ろに置く。
+# 逆にすると (例: JIS3_4 を L より前に置くと)「わらi」で稀用漢字の「咍/嘻/辴」が
+# 「笑」より先に出るといった、マイナー候補が先頭に来る問題が起きる。
 JISYO_FILES=(
-    "dict/SKK-JISYO.assoc"
-    "dict/SKK-JISYO.china_taiwan"
-    "dict/SKK-JISYO.edict"
-    "emoji-ja/SKK-JISYO.emoji-ja.utf8"
-    "emoji/SKK-JISYO.emoji.utf8"
-    "dict/SKK-JISYO.fullname"
-    "dict/SKK-JISYO.geo"
-    "dict/SKK-JISYO.itaiji"
-    "dict/SKK-JISYO.itaiji.JIS3_4"
-    "SKK-JISYO.jawiki"
+    # --- 基本・一般語彙 (最優先) ---
+    "dict/SKK-JISYO.L"
+    # --- 人名・固有名詞 ---
     "dict/SKK-JISYO.jinmei"
+    "dict/SKK-JISYO.fullname"
+    "dict/SKK-JISYO.propernoun"
+    # --- 地名・駅名など ---
+    "dict/SKK-JISYO.geo"
+    "dict/SKK-JISYO.station"
+    "dict/SKK-JISYO.law"
+    "dict/SKK-JISYO.okinawa"
+    "dict/SKK-JISYO.china_taiwan"
+    "dict/SKK-JISYO.assoc"
+    "dict/SKK-JISYO.mazegaki"
+    "dict/zipcode/SKK-JISYO.office.zipcode"
+    "dict/zipcode/SKK-JISYO.zipcode"
+    # --- Web 由来 (大量・ノイズ多め) ---
+    "SKK-JISYO.jawiki"
+    "dict/SKK-JISYO.edict"
+    # --- 稀用漢字・異体字 (マイナー) ---
     "dict/SKK-JISYO.JIS2"
     "dict/SKK-JISYO.JIS3_4"
     "dict/SKK-JISYO.JIS2004"
-    "dict/SKK-JISYO.L"
-    "dict/SKK-JISYO.law"
-    "dict/SKK-JISYO.mazegaki"
-    "dict/zipcode/SKK-JISYO.office.zipcode"
-    "dict/SKK-JISYO.okinawa"
-    "dict/SKK-JISYO.propernoun"
-    "dict/SKK-JISYO.station"
-    "dict/zipcode/SKK-JISYO.zipcode"
+    "dict/SKK-JISYO.itaiji"
+    "dict/SKK-JISYO.itaiji.JIS3_4"
     "wiktionary/SKK_JISYO.shikakugoma"
+    # --- 絵文字 (末尾) ---
+    "emoji-ja/SKK-JISYO.emoji-ja.utf8"
+    "emoji/SKK-JISYO.emoji.utf8"
 )
 
 # --- ユーティリティ -----------------------------------------------------
