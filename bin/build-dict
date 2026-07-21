@@ -4,11 +4,15 @@
 # 上流の SKK 辞書群を取得 → 一時ファイルにビルド → 原子的差し替え → 変化時のみ
 # yaskkserv2 サービスを再起動する。launchd から日次で呼ばれることを想定。
 #
+# 再ビルドは「上流辞書データが変わったとき」または「ビルドレシピ (この build-dict と
+# normalize-jisyo) が変わったとき」に走る。後者は $RECIPE_STAMP の指紋比較で検知するので、
+# レシピを編集すれば次回の日次実行で自動的に反映される (--force 不要)。
+#
 # AquaSKK の HTTP 辞書自動更新 (SKKHttpDictionaryLoader) を置き換えるもの。
 # 個人学習辞書 (delphinus/skk-jisyo) とは別系統 — こちらは公開システム辞書専用。
 #
 # 使い方:
-#   bin/build-dict           通常実行 (上流に変化があったときだけ再構築)
+#   bin/build-dict           通常実行 (上流またはレシピに変化があったときだけ再構築)
 #   bin/build-dict --force   変化の有無にかかわらず再構築する
 
 set -euo pipefail
@@ -20,6 +24,7 @@ VAR="$PREFIX/var/yaskkserv2"
 SRC="$VAR/sources"                       # 上流クローンのキャッシュ (このスクリプトが管理)
 DICT="$VAR/dictionary.yaskkserv2"        # yaskkserv2 が読む辞書 (出力)
 LOCK="$VAR/.build-dict.lock"
+RECIPE_STAMP="$VAR/.recipe.sha"          # 前回ビルドに使ったレシピの指紋 (このスクリプトが管理)
 IDLE_THRESHOLD_SEC="${YASKK_BUILD_IDLE_THRESHOLD_SEC:-60}"
 
 JAWIKI_URL="https://github.com/tokuhirom/jawiki-kana-kanji-dict/releases/latest/download/SKK-JISYO.jawiki"
@@ -78,6 +83,13 @@ JISYO_FILES=(
 log() { printf '%s %s\n' "$(/bin/date -Iseconds)" "$*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
 
+# ビルドレシピ = このスクリプト自身 + normalizer。辞書の並び順や正規化ロジックなど、
+# 出力に影響する「作り方」の指紋を取る。上流データが変わらなくてもレシピが変われば
+# 再ビルドさせるために使う (変化判定で参照)。
+SELF="${BASH_SOURCE[0]}"
+NORMALIZER="$(dirname "$SELF")/normalize-jisyo"
+recipe_hash() { cat "$SELF" "$NORMALIZER" | shasum -a 256 | awk '{print $1}'; }
+
 FORCE=0
 [[ "${1:-}" == "--force" ]] && FORCE=1
 
@@ -111,6 +123,7 @@ command -v yaskkserv2_make_dictionary >/dev/null || die "yaskkserv2_make_diction
 command -v git >/dev/null || die "git not found in PATH"
 command -v curl >/dev/null || die "curl not found in PATH"
 command -v python3 >/dev/null || die "python3 not found in PATH"
+command -v shasum >/dev/null || die "shasum not found in PATH"
 
 # --- git ソースの更新 ---------------------------------------------------
 
@@ -174,6 +187,15 @@ fi
 if (( FORCE )); then
     CHANGED=1
 fi
+
+# レシピ (build-dict / normalize-jisyo) が変わったら、上流に変化が無くても再ビルドする。
+# 反映済みの指紋はビルド成功後に $RECIPE_STAMP へ保存する (原子的差し替えの後)。
+recipe_now="$(recipe_hash)"
+if [[ "$recipe_now" != "$(cat "$RECIPE_STAMP" 2>/dev/null || true)" ]]; then
+    CHANGED=1
+    log "recipe changed; rebuild"
+fi
+
 if (( ! CHANGED )); then
     log "no upstream change; skip rebuild"
     exit 0
@@ -199,7 +221,7 @@ trap 'cleanup_tmp; rmdir "$LOCK" 2>/dev/null || true' EXIT
 # 見出しの "う゛" を "ゔ" に正規化 (UTF-8化) してからビルドする。EUC辞書 (SKK-JISYO.L等,
 # ヴ音を "う゛" で登録) と UTF-8辞書 (jawiki等, "ゔ" ネイティブ) の見出しを揃えるため。
 # 正規化コピーを元と同じ順序で make_dictionary に渡す。
-normalizer="$(dirname "${BASH_SOURCE[0]}")/normalize-jisyo"
+normalizer="$NORMALIZER"
 norm_args=()
 for idx in "${!build_args[@]}"; do
     nf="$norm_dir/$idx.jisyo"
@@ -214,6 +236,7 @@ fi
 [[ -s "$tmp_dict" ]] || die "built dictionary is empty; aborting"
 
 mv -f "$tmp_dict" "$DICT"
+printf '%s\n' "$recipe_now" > "$RECIPE_STAMP"   # このレシピで作った証跡 (次回の変化判定に使う)
 log "installed: $DICT ($(wc -c <"$DICT" | tr -d ' ') bytes)"
 
 # --- サービス再起動 -----------------------------------------------------
