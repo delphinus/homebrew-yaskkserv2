@@ -10,10 +10,14 @@ class Yaskkserv2 < Formula
   version "0.1.7"
   sha256 "942525683f6725475468af42d9387b650e443f207e00d10a909eb86110fbe946"
   license any_of: ["Apache-2.0", "MIT"]
-  revision 1
+  revision 2
   head "https://github.com/wachikun/yaskkserv2.git", branch: "master"
 
   depends_on "rust" => :build
+
+  # 送りあり見出しを Google 日本語入力へ問い合わせないようにする。upstream へ提案予定。
+  # 詳細は下の __END__ 以降のコメントを参照。
+  patch :DATA
 
   def install
     system "cargo", "install", *std_cargo_args
@@ -85,3 +89,38 @@ class Yaskkserv2 < Formula
     system bin/"yaskkserv2_make_dictionary", "--help"
   end
 end
+
+__END__
+--- a/src/skk/yaskkserv2/dictionary_reader.rs
++++ b/src/skk/yaskkserv2/dictionary_reader.rs
+@@ -43,8 +43,15 @@
+         let mut result = Vec::with_capacity(RESULT_VEC_CAPACITY);
+         result.push(b'1');
+         let midashi = Self::get_midashi(midashi_buffer);
++        // 送りあり見出し ("かんがえk" など) は Google Japanese Input へ問い合わせない。
++        // Google は送り仮名を表す末尾のアルファベットを解釈できず、仮名部分に対する
++        // 候補 (= 送りなし候補) を返すため、それをそのまま送りあり候補として配ると
++        // 誤った変換結果になる ("かんがえk" に対し "考え" や "カンガエ" が返る)。
++        // 見出しを機械的に生成して問い合わせるクライアント (補完など) では、辞書に
++        // 無い見出しが大量に生成されるため、この誤りと待ち時間が入力のたびに発生する。
++        let is_okuri_ari = Self::is_okuri_ari(midashi);
+         let dictionary_midashi_key = Dictionary::get_dictionary_midashi_key(&midashi_buffer[1..])?;
+-        if self.config.google_timing == GoogleTiming::First {
++        if !is_okuri_ari && self.config.google_timing == GoogleTiming::First {
+             // Google API など、外部要因エラーは無視して継続させることに注意
+             let _ignore_error_and_continue = self.read_google_candidates(midashi, &mut result);
+         }
+@@ -59,9 +66,10 @@
+                 &mut result,
+             )?;
+         }
+-        if self.config.google_timing == GoogleTiming::Last
+-            || (self.config.google_timing == GoogleTiming::NotFound
+-                && Yaskkserv2::is_empty_candidates(&result))
++        if !is_okuri_ari
++            && (self.config.google_timing == GoogleTiming::Last
++                || (self.config.google_timing == GoogleTiming::NotFound
++                    && Yaskkserv2::is_empty_candidates(&result)))
+         {
+             let _ignore_error_and_continue = self.read_google_candidates(midashi, &mut result);
+         }
