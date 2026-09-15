@@ -20,11 +20,34 @@ set -euo pipefail
 
 PORT=1178
 TIMEOUT_SEC="${YASKK_WATCHDOG_TIMEOUT_SEC:-3}"   # 1 回の probe で応答を待つ秒数
-LABEL="homebrew.mxcl.yaskkserv2"                 # brew services 由来の launchd ラベル
 DOMAIN="gui/$(id -u)"
 LOCK="${TMPDIR:-/tmp}/.yaskkserv2-watchdog.lock"
 
 log() { printf '%s %s\n' "$(/bin/date -Iseconds)" "$*" >&2; }
+
+# brew services が使う launchd ラベルを、実際の状態を見て決める。
+#
+# ラベルは Homebrew のバージョンで変わる (古い brew は homebrew.mxcl.yaskkserv2、
+# 新しい brew は sh.brew.yaskkserv2)。決め打ちすると brew が更新された日から
+# kickstart が失敗するようになり、それと気付かないまま brew services への
+# フォールバックだけで復旧している状態になる。
+#
+# まず読み込まれている job から拾う (依存なしで速い)。サービスが落ちていて
+# 読み込まれていないときは brew に訊く。どちらも駄目なら空を返し、
+# 呼び出し側は brew services 側の道だけを使う。
+detect_label() {
+    local label
+    label="$(launchctl list 2>/dev/null | awk '$3 ~ /(^|\.)yaskkserv2$/ { print $3; exit }')"
+    if [[ -n "$label" ]]; then
+        printf '%s\n' "$label"
+        return
+    fi
+    brew services info yaskkserv2 --json 2>/dev/null \
+        | sed -n 's/.*"service_name" *: *"\([^"]*\)".*/\1/p' \
+        | head -1
+}
+
+LABEL="$(detect_label)"
 
 CHECK_ONLY=0
 [[ "${1:-}" == "--check" ]] && CHECK_ONLY=1
@@ -54,7 +77,7 @@ restart() {
     local before after
     before="$(listener_pid)"
 
-    launchctl kickstart -k "$DOMAIN/$LABEL" >/dev/null 2>&1 \
+    { [[ -n "$LABEL" ]] && launchctl kickstart -k "$DOMAIN/$LABEL" >/dev/null 2>&1; } \
         || brew services restart yaskkserv2 >/dev/null 2>&1 || true
     sleep 2
     after="$(listener_pid)"
@@ -75,7 +98,7 @@ restart() {
             kill -9 "$before" 2>/dev/null || true
             sleep 1
         fi
-        launchctl kickstart "$DOMAIN/$LABEL" >/dev/null 2>&1 \
+        { [[ -n "$LABEL" ]] && launchctl kickstart "$DOMAIN/$LABEL" >/dev/null 2>&1; } \
             || brew services start yaskkserv2 >/dev/null 2>&1 || true
         sleep 2
         after="$(listener_pid)"

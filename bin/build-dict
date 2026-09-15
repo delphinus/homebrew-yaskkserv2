@@ -246,13 +246,28 @@ log "installed: $DICT ($(wc -c <"$DICT" | tr -d ' ') bytes)"
 
 listener_pid() { lsof -nP -iTCP:1178 -sTCP:LISTEN -t 2>/dev/null | head -1 || true; }
 
+# brew services が使う launchd ラベルは Homebrew のバージョンで変わる
+# (古い brew は homebrew.mxcl.yaskkserv2、新しい brew は sh.brew.yaskkserv2)。
+# 決め打ちせず実際の状態を見て決める。詳細は bin/yaskkserv2-watchdog の detect_label 参照。
+detect_label() {
+    local label
+    label="$(launchctl list 2>/dev/null | awk '$3 ~ /(^|\.)yaskkserv2$/ { print $3; exit }')"
+    if [[ -n "$label" ]]; then
+        printf '%s\n' "$label"
+        return
+    fi
+    brew services info yaskkserv2 --json 2>/dev/null \
+        | sed -n 's/.*"service_name" *: *"\([^"]*\)".*/\1/p' \
+        | head -1
+}
+
 restart_service() {
-    local label="homebrew.mxcl.yaskkserv2"
-    local domain="gui/$(id -u)"
-    local before after
+    local label domain before after
+    label="$(detect_label)"
+    domain="gui/$(id -u)"
     before="$(listener_pid)"
 
-    launchctl kickstart -k "$domain/$label" >/dev/null 2>&1 \
+    { [[ -n "$label" ]] && launchctl kickstart -k "$domain/$label" >/dev/null 2>&1; } \
         || brew services restart yaskkserv2 >/dev/null 2>&1 || true
     sleep 2
     after="$(listener_pid)"
@@ -269,7 +284,7 @@ restart_service() {
         log "stale listener pid $before still bound; killing to force reload"
         kill "$before" 2>/dev/null || true
         sleep 1
-        launchctl kickstart "$domain/$label" >/dev/null 2>&1 \
+        { [[ -n "$label" ]] && launchctl kickstart "$domain/$label" >/dev/null 2>&1; } \
             || brew services start yaskkserv2 >/dev/null 2>&1 || true
         sleep 2
         after="$(listener_pid)"
