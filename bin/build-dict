@@ -72,7 +72,10 @@ JISYO_FILES=(
     "dict/SKK-JISYO.JIS2004"
     "dict/SKK-JISYO.itaiji"
     "dict/SKK-JISYO.itaiji.JIS3_4"
-    "wiktionary/SKK_JISYO.shikakugoma"
+    # 上流 (KeenS/SKK_JISYO.wiktionary) はリポジトリ名こそ SKK_JISYO だが、
+    # 中の辞書ファイルは SKK-JISYO 始まり。2026-09-25 の更新で SKK_JISYO.* から
+    # 改名されたので、ハイフンのほうを見る。
+    "wiktionary/SKK-JISYO.shikakugoma"
     # --- 絵文字 (末尾) ---
     "emoji-ja/SKK-JISYO.emoji-ja.utf8"
     "emoji/SKK-JISYO.emoji.utf8"
