@@ -18,11 +18,24 @@ brew tap delphinus/yaskkserv2
 brew install --HEAD yaskkserv2
 ```
 
-安定版（0.1.7、2023年9月リリース）:
+安定版（上流 master の特定のコミットに固定したもの。下記「バージョンについて」参照）:
 
 ```bash
 brew install yaskkserv2
 ```
+
+## バージョンについて
+
+このリポジトリには 2 種類のバージョンがあり、互いに連動しません。
+
+| 種類 | 例 | 表すもの | どこで見るか |
+| --- | --- | --- | --- |
+| tap のバージョン | `v1.0.0` | このリポジトリ自体のバージョン。辞書の自動更新・watchdog などのスクリプトや Formula の変更をまとめたもの | git のタグと [Releases](https://github.com/delphinus/homebrew-yaskkserv2/releases) |
+| Formula のバージョン | `0.1.7_2` | Homebrew が入れる yaskkserv2 本体のバージョン | `yaskkserv2.rb` の `version` と `revision`、`brew info yaskkserv2` |
+
+- tap のバージョンは [Semantic Versioning](https://semver.org/lang/ja/) に従います。
+- 上流 yaskkserv2 の最後のリリースは 0.1.7 (2023 年 9 月) です。Formula は上流 master の特定のコミットに固定し、`version` は上流の `Cargo.toml` に合わせて `0.1.7` のままにしています。
+- 固定するコミットを進めたり、パッチや `service` ブロックを変えたりしたときは、`revision` を 1 つ上げます。`version` が変わらないので、`revision` を上げないと `brew upgrade` が変更を検知しません。`brew info` では `0.1.7_2` のように `_<revision>` 付きで表示されます。
 
 ## 使い方
 
