@@ -127,11 +127,28 @@ brew services restart yaskkserv2
 これで以下が行われます (冪等):
 
 - 源辞書キャッシュ `$(brew --prefix)/var/yaskkserv2/sources/` の作成
-- LaunchAgent (`com.delphinus.yaskkserv2-dict`) を `~/Library/LaunchAgents/` にシンボリックリンクして登録 (日次 04:23 / スリープ中に逃した分は起床時に実行)
+- LaunchAgent (`com.delphinus.yaskkserv2-dict`) を `~/Library/LaunchAgents/` にシンボリックリンクして登録 (1 時間ごとに起動し、上流の確認は 1 日 1 回。下記参照)
 - LaunchAgent (`com.delphinus.yaskkserv2-watchdog`) を登録 (60 秒ごとに死活監視。下記参照)
 - 初回ビルド (`bin/build-dict --force`)
 
 ログは `~/Library/Logs/yaskkserv2-dict.log` に出力されます。
+
+### 実行のタイミング
+
+LaunchAgent は 1 時間ごと (とログイン時) に `bin/build-dict` を起動します。`build-dict` は
+前回の確認から 20 時間経つまでは何もせずに終わるので、上流の確認は 1 日 1 回です。
+ビルドレシピ (`bin/build-dict` など) が変わったときは 20 時間を待たずに再構築します。
+
+さらに、入力中に yaskkserv2 を再起動しないよう、無操作が 60 秒に満たないときは確認を
+見送り、次の 1 時間後に回します。
+
+以前は毎日 04:23 の定時起動でしたが、launchd はスリープ中に逃した定時の分しか後から
+実行しません。毎晩電源を切る Mac では一度も起動せず、辞書が更新されなくなっていました。
+
+| 環境変数 | 既定値 | 意味 |
+| --- | --- | --- |
+| `YASKK_BUILD_CHECK_INTERVAL_SEC` | `72000` (20 時間) | 上流を確認する間隔 |
+| `YASKK_BUILD_IDLE_THRESHOLD_SEC` | `60` | これ未満の無操作なら見送る (`0` で無効) |
 
 ### 手動実行 / 停止
 

@@ -2,7 +2,11 @@
 # yaskkserv2 のシステム辞書 (dictionary.yaskkserv2) を上流に追従して再構築する。
 #
 # 上流の SKK 辞書群を取得 → 一時ファイルにビルド → 原子的差し替え → 変化時のみ
-# yaskkserv2 サービスを再起動する。launchd から日次で呼ばれることを想定。
+# yaskkserv2 サービスを再起動する。launchd から 1 時間ごとに呼ばれ、上流の確認は
+# $CHECK_STAMP を見て 1 日 1 回 ($CHECK_INTERVAL_SEC ごと) に間引く。
+#
+# 定時 (StartCalendarInterval) にしないのは、毎晩電源を切る Mac では定時の起動が
+# 一度も来ないため (スリープ中に逃した分は起床時に発火するが、電源断の分は発火しない)。
 #
 # 再ビルドは「上流辞書データが変わったとき」または「ビルドレシピ (この build-dict と
 # normalize-jisyo、make-shikakugoma) が変わったとき」に走る。後者は $RECIPE_STAMP の
@@ -27,6 +31,8 @@ DICT="$VAR/dictionary.yaskkserv2"        # yaskkserv2 が読む辞書 (出力)
 LOCK="$VAR/.build-dict.lock"
 RECIPE_STAMP="$VAR/.recipe.sha"          # 前回ビルドに使ったレシピの指紋 (このスクリプトが管理)
 IDLE_THRESHOLD_SEC="${YASKK_BUILD_IDLE_THRESHOLD_SEC:-60}"
+CHECK_STAMP="$VAR/.last-check"           # 最後に上流を確認し終えた時刻 (このスクリプトが管理)
+CHECK_INTERVAL_SEC="${YASKK_BUILD_CHECK_INTERVAL_SEC:-72000}"   # 20 時間。日ごとの起動時刻のずれを吸収する
 
 JAWIKI_URL="https://github.com/tokuhirom/jawiki-kana-kanji-dict/releases/latest/download/SKK-JISYO.jawiki"
 JAWIKI_FILE="$SRC/SKK-JISYO.jawiki"
@@ -113,6 +119,18 @@ if ! mkdir "$LOCK" 2>/dev/null; then
     exit 0
 fi
 trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+
+# --- 確認の間引き (--force 時はスキップ) ---------------------------------
+# 1 時間ごとに起動されるが、上流の確認は $CHECK_INTERVAL_SEC に 1 回でよい。ここでは
+# ログを出さない (毎時のログで埋まるのを避ける)。レシピが変わったときは間引かない。
+
+if (( ! FORCE )) && [[ -f "$CHECK_STAMP" ]] \
+        && [[ "$(recipe_hash)" == "$(cat "$RECIPE_STAMP" 2>/dev/null || true)" ]]; then
+    last_check="$(cat "$CHECK_STAMP" 2>/dev/null || echo 0)"
+    if (( $(/bin/date +%s) - ${last_check:-0} < CHECK_INTERVAL_SEC )); then
+        exit 0
+    fi
+fi
 
 # --- アイドルチェック (--force 時はスキップ) -----------------------------
 # 入力中にサービスを再起動して取りこぼすのを避ける。再起動は「変化時のみ」なので緩め。
@@ -215,6 +233,7 @@ fi
 
 if (( ! CHANGED )); then
     log "no upstream change; skip rebuild"
+    /bin/date +%s > "$CHECK_STAMP"
     exit 0
 fi
 
@@ -326,4 +345,5 @@ restart_service() {
 }
 restart_service
 
+/bin/date +%s > "$CHECK_STAMP"
 log "build ok"
