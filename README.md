@@ -154,10 +154,28 @@ launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.delphinus.yaskkserv2-d
 | [skk-dev/dict](https://github.com/skk-dev/dict) | L, jinmei, geo, propernoun, station, law, okinawa, assoc, edict, fullname, itaiji, itaiji.JIS3_4, JIS2, JIS3_4, JIS2004, mazegaki, china_taiwan, zipcode, office.zipcode |
 | [uasi/skk-emoji-jisyo](https://github.com/uasi/skk-emoji-jisyo) | emoji |
 | [ymrl/SKK-JISYO.emoji-ja](https://github.com/ymrl/SKK-JISYO.emoji-ja) | emoji-ja |
-| [KeenS/SKK_JISYO.wiktionary](https://github.com/KeenS/SKK_JISYO.wiktionary) | shikakugoma |
+| [KeenS/SKK_JISYO.wiktionary](https://github.com/KeenS/SKK_JISYO.wiktionary) | shikakugoma (下記の合成の元) |
+| [Unicode Unihan Database](https://www.unicode.org/charts/unihan.html) | shikakugoma (下記の合成の元。`Unihan.zip` を取得) |
+| [happyDom/trimeSJHM](https://github.com/happyDom/trimeSJHM) | shikakugoma (下記の合成の元) |
 | [tokuhirom/jawiki-kana-kanji-dict](https://github.com/tokuhirom/jawiki-kana-kanji-dict) | jawiki (GitHub Releases から取得) |
 
 辞書を追加・削除したい場合は `bin/build-dict` の該当配列を編集してください。
+
+### 四角号碼の辞書
+
+Wiktionary から作られた四角号碼の辞書は約 7,000 字しか収録しておらず、「鰀」のような稀用漢字が
+引けません。そこで `bin/make-shikakugoma` が次の 3 つを重ねて、約 74,000 字の辞書
+(`sources/generated/SKK-JISYO.shikakugoma`) を作ります。
+
+| 順 | データ | 字数 | 使い方 |
+| --- | --- | --- | --- |
+| 1 | Wiktionary の辞書 | 約 7,000 | そのまま使う。候補順も保つ |
+| 2 | Unihan の `kFourCornerCode` | 約 16,900 | 1 に無い (字, コード) の組を足す |
+| 3 | trimeSJHM (`sjhm_base.dict.yaml`) | 約 74,000 | 1・2 のどちらにも無い字と、附角が分からない字の補完にだけ使う |
+
+trimeSJHM は中国の字形表に沿った独自の取り方 (新四角号码) で、附角が標準と食い違う字が
+多いため、優先度を最も低くしています。4 桁しか載っていない字は 4 桁の見出しにだけ出ます。
+同じコードの候補は 1 → 2 → 3 の順に並び、2・3 で足した字は JIS X 0213 で表せる字が先に来ます。
 
 ## 死活監視 (watchdog)
 
