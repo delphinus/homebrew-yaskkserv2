@@ -10,17 +10,13 @@
         <string>/Users/jinnouchi.yasushi/git/github.com/delphinus/homebrew-yaskkserv2/bin/build-dict</string>
     </array>
 
-    <!-- 日次。スリープで逃した分は起床時に発火する。再構築は上流に変化があったときだけ。 -->
-    <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>4</integer>
-        <key>Minute</key>
-        <integer>23</integer>
-    </dict>
+    <!-- 1 時間ごと。上流の確認は build-dict が 1 日 1 回に間引く。定時 (StartCalendarInterval)
+         にすると、毎晩電源を切る Mac では一度も起動しない。再構築は上流に変化があったときだけ。 -->
+    <key>StartInterval</key>
+    <integer>3600</integer>
 
     <key>RunAtLoad</key>
-    <false/>
+    <true/>
 
     <key>EnvironmentVariables</key>
     <dict>

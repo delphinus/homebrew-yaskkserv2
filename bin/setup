@@ -63,7 +63,7 @@ log "ensuring source cache dir: $VAR/sources"
 /bin/mkdir -p "$VAR/sources"
 
 # 3. LaunchAgent を登録
-#    - dict:     上流 SKK 辞書を日次で再構築
+#    - dict:     上流 SKK 辞書を 1 日 1 回確認して再構築 (起動は 1 時間ごと)
 #    - watchdog: yaskkserv2 の死活を監視し、hang を検知したら再起動
 install_agent "com.delphinus.yaskkserv2-dict" "$REPO_ROOT/bin/build-dict"
 install_agent "com.delphinus.yaskkserv2-watchdog" "$REPO_ROOT/bin/yaskkserv2-watchdog"
@@ -75,7 +75,7 @@ log "running initial build (bin/build-dict --force)"
 log "setup complete."
 log "  - sources:  $VAR/sources"
 log "  - dict:     $VAR/dictionary.yaskkserv2"
-log "  - launchd:  com.delphinus.yaskkserv2-dict (daily 04:23)"
+log "  - launchd:  com.delphinus.yaskkserv2-dict (hourly, checks upstream once a day)"
 log "  - launchd:  com.delphinus.yaskkserv2-watchdog (every 60s)"
 log "  - logs:     ~/Library/Logs/yaskkserv2-dict.log"
 log "              ~/Library/Logs/yaskkserv2-watchdog.log"
