@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+# 四角号碼の SKK 辞書を 3 つのデータから合成する。
+#
+# KeenS/SKK_JISYO.wiktionary の SKK-JISYO.shikakugoma は約 7,000 字しか収録しておらず、
+# 「鰀」のような稀用漢字が引けない。そこで次の順に重ねて字数を補う。
+#
+# 1. Wiktionary (SKK-JISYO.shikakugoma)  — 字数は少ないが附角まで標準的。候補順もそのまま使う。
+# 2. Unicode Unihan の kFourCornerCode   — 約 16,900 字。Wiktionary とほぼ一致する。
+#                                          Wiktionary に無い (字, コード) の組を足す。
+# 3. happyDom/trimeSJHM (sjhm_base)      — 約 74,000 字。中国の字形表に沿った独自の取り方で、
+#                                          附角が標準と食い違うことが多い。そのため
+#                                          1・2 のどちらにも無い字と、1・2 に 4 桁しか無い字の
+#                                          附角の補完にだけ使う。4 桁しか載っていない字は
+#                                          4 桁の見出しにだけ出す。
+#
+# 同じコードの候補は 1 → 2 → 3 の順に並べる。2・3 で足す字は、JIS X 0213 (euc_jis_2004)
+# で表せる字を先に、その中ではコードポイント順に並べる (日本語で使う字を前に出すため)。
+#
+# 見出しは元の辞書と同じく 4 桁 (四角) と 5 桁 (四角 + 附角) の両方を出す。
+#
+# usage: make-shikakugoma WIKTIONARY_JISYO UNIHAN_ZIP SJHM_DICT_YAML OUTPUT
+import re
+import sys
+import zipfile
+from collections import defaultdict
+
+TIER_WIKTIONARY, TIER_UNIHAN, TIER_SJHM = 1, 2, 3
+
+# CJK 統合漢字・互換漢字の範囲。sjhm_base には句読点 (「・」「，」など) も入っているので除く。
+_IDEOGRAPH_RANGES = (
+    (0x3400, 0x4DBF),    # 拡張 A
+    (0x4E00, 0x9FFF),    # 統合漢字
+    (0xF900, 0xFAFF),    # 互換漢字
+    (0x20000, 0x3FFFF),  # 拡張 B 以降・互換漢字補助
+)
+_CODE = re.compile(r"\d{4}\d?")
+
+
+def is_ideograph(c: str) -> bool:
+    cp = ord(c)
+    return len(c) == 1 and any(lo <= cp <= hi for lo, hi in _IDEOGRAPH_RANGES)
+
+
+def in_jis(c: str) -> bool:
+    try:
+        c.encode("euc_jis_2004")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+def read_wiktionary(path):
+    """(コード, 字) を出現順に返す。"""
+    pairs = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            if line.startswith(";") or " /" not in line:
+                continue
+            code, cands = line.rstrip("\n").split(" /", 1)
+            if not _CODE.fullmatch(code):
+                continue
+            for cand in cands.strip("/").split("/"):
+                c = cand.split(";", 1)[0]
+                if is_ideograph(c):
+                    pairs.append((code, c))
+    return pairs
+
+
+def read_unihan(path):
+    """字 → コードの集合。値が "2044.7" なら 5 桁、"6020" のように附角が無ければ 4 桁。"""
+    codes = defaultdict(set)
+    with zipfile.ZipFile(path) as z:
+        with z.open("Unihan_DictionaryLikeData.txt") as f:
+            for raw in f:
+                line = raw.decode("utf-8")
+                if "\tkFourCornerCode\t" not in line:
+                    continue
+                cp, _, value = line.rstrip("\n").split("\t")
+                c = chr(int(cp[2:], 16))
+                for v in value.split():
+                    code = v.replace(".", "")
+                    if _CODE.fullmatch(code):
+                        codes[c].add(code)
+    return codes
+
+
+def read_sjhm(path):
+    """字 → コード (4 桁または 5 桁) の集合。短縮コードの行 (3 列) は使わない。
+
+    6 桁の行は 6 桁目が trimeSJHM 独自の「又附码」なので、先頭 5 桁 (四角 + 附角) だけ使う。
+    """
+    codes = defaultdict(set)
+    body = False
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            if line.startswith("..."):
+                body = True
+                continue
+            if not body or line.startswith("#"):
+                continue
+            cols = line.rstrip("\n").split("\t")
+            if len(cols) == 2 and is_ideograph(cols[0]) and re.fullmatch(r"\d{4,6}", cols[1]):
+                codes[cols[0]].add(cols[1][:5])
+    return codes
+
+
+def main():
+    if len(sys.argv) != 5:
+        sys.exit("usage: make-shikakugoma WIKTIONARY_JISYO UNIHAN_ZIP SJHM_DICT_YAML OUTPUT")
+    wikt_path, unihan_path, sjhm_path, out_path = sys.argv[1:]
+
+    # 見出し → {字: (tier, 出現順)}。同じ字が複数の tier から来たら小さい tier を採る。
+    entries = defaultdict(dict)
+    seq = 0
+
+    def add(code, c, tier):
+        nonlocal seq
+        for key in {code[:4], code}:
+            if c not in entries[key] or entries[key][c][0] > tier:
+                entries[key][c] = (tier, seq)
+                seq += 1
+
+    known = defaultdict(set)  # 1・2 で分かっている字 → コード
+    for code, c in read_wiktionary(wikt_path):
+        add(code, c, TIER_WIKTIONARY)
+        known[c].add(code)
+    for c, codes in read_unihan(unihan_path).items():
+        for code in codes:
+            add(code, c, TIER_UNIHAN)
+            known[c].add(code)
+    for c, codes in read_sjhm(sjhm_path).items():
+        if c not in known:
+            use = codes
+        elif not any(len(k) == 5 for k in known[c]):
+            # 附角だけ補う。四角の 4 桁が 1・2 と一致するものに限る。
+            use = {code for code in codes if len(code) == 5 and code[:4] in known[c]}
+        else:
+            continue
+        for code in use:
+            add(code, c, TIER_SJHM)
+
+    def order(item):
+        c, (tier, s) = item
+        if tier == TIER_WIKTIONARY:
+            return (tier, 0, s)
+        return (tier, 0 if in_jis(c) else 1, ord(c))
+
+    with open(out_path, "w", encoding="utf-8") as out:
+        out.write(
+            ";; -*- mode: fundamental; coding: utf-8 -*-\n"
+            ";; 四角号碼の辞書。bin/make-shikakugoma が次のデータから合成したもの。\n"
+            ";;   Wiktionary 日本語版 (KeenS/SKK_JISYO.wiktionary 経由): CC BY-SA 3.0\n"
+            ";;     https://ja.wiktionary.org/ https://creativecommons.org/licenses/by-sa/3.0/deed.ja\n"
+            ";;   Unicode Unihan Database (kFourCornerCode): Unicode License v3\n"
+            ";;     https://www.unicode.org/license.txt\n"
+            ";;   happyDom/trimeSJHM (sjhm_base.dict.yaml): MIT License, Copyright (c) 2025 Dyy\n"
+            ";;     https://github.com/happyDom/trimeSJHM\n"
+            ";; okuri-ari entries.\n"
+            ";; okuri-nasi entries.\n"
+        )
+        for key in sorted(entries):
+            cands = [c for c, _ in sorted(entries[key].items(), key=order)]
+            out.write(f"{key} /{'/'.join(cands)}/\n")
+
+
+if __name__ == "__main__":
+    main()
