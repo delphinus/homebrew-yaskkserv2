@@ -87,3 +87,6 @@ build-iPhoneSimulator/
 
 # Claude Code
 .claude
+
+# skkserv-karukan-proxy のビルド成果物 (bin/setup が作る)
+/karukan-proxy/skkserv-karukan-proxy

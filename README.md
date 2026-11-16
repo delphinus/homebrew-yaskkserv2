@@ -229,6 +229,52 @@ macSKK は辞書フォルダの変更を検知して、差し替わった辞書�
 | 環境変数 | 既定値 | 意味 |
 | --- | --- | --- |
 | `YASKK_BUILD_MACSKK_TIMEOUT_SEC` | `30` | 辞書フォルダへのコピーを打ち切るまでの秒数 (応答されない許可のプロンプトで止まらないように) |
+## macSKK 用の karukan プロキシ
+
+[karukan](https://github.com/togatoga/karukan) の karukan-server (ニューラルかな漢字変換、HTTP) を、
+macSKK から skkserv として引くためのプロキシ `skkserv-karukan-proxy` を同梱しています
+(`karukan-proxy/`、Go)。karukan-server は skkserv のプロトコルを話さないので、間に挟みます。
+
+macSKK には「前の辞書で見つからなかったときだけ引く」設定が無いので、プロキシがそれを行います。
+
+| 問い合わせ | 応答 |
+| --- | --- |
+| 送りなしの読み (ひらがなだけ) で、yaskkserv2 に候補がある | 見つからない (`4`)。karukan は引かない |
+| 送りなしの読み (ひらがなだけ) で、yaskkserv2 に候補が無い | karukan の候補だけ (読みそのもの・重複・`/` や `;` を含む候補は除く) |
+| 送りありの読み、英字や数字を含む読み、補完 | 見つからない (`4`) |
+| yaskkserv2 か karukan-server に問い合わせられない | 見つからない (`4`) |
+
+macSKK は skkserv の応答を変換のたびに待つ (タイムアウト 1 秒) ので、yaskkserv2 には 200 ミリ秒、
+karukan-server には 600 ミリ秒で打ち切ります。karukan-server に繋がらなかったときは 5 秒間問い合わせません。
+問い合わせた読みはログに出しません。
+
+### セットアップ
+
+`go` (`brew install go`) と karukan-server が要ります。karukan-server の常駐はこのリポジトリでは扱いません。
+
+`./bin/setup` が `karukan-proxy/skkserv-karukan-proxy` をビルドし、LaunchAgent
+(`com.delphinus.skkserv-karukan-proxy`、`127.0.0.1:1179` で待ち受け) を登録します。`go` が無ければ飛ばします。
+ソースを変えたら `./bin/setup` を流し直してください。
+
+macSKK の設定の「skkserv」で、次のように設定します。
+
+- ホスト `127.0.0.1`、ポート `1179`
+- 要求・応答の文字コード: UTF-8
+- 「ユーザー辞書に保存」をオフ (karukan の候補を学習させないため)
+
+辞書の候補は、上の「macSKK で使う」でメモリに持たせた辞書から出ます。
+
+| オプション | 既定値 | 意味 |
+| --- | --- | --- |
+| `-listen` | `127.0.0.1:1179` | 待ち受けるアドレス |
+| `-yaskkserv2` | `127.0.0.1:1178` | yaskkserv2 のアドレス |
+| `-karukan` | `http://127.0.0.1:3000` | karukan-server の URL |
+| `-num-candidates` | `5` | karukan に求める候補の数 |
+| `-model` | (サーバの既定) | karukan のモデル |
+| `-yaskkserv2-timeout` / `-karukan-timeout` | `200ms` / `600ms` | 問い合わせを打ち切る時間 |
+| `-karukan-backoff` | `5s` | karukan-server に繋がらなかったとき、問い合わせを止める時間 |
+
+ログは `~/Library/Logs/skkserv-karukan-proxy.log` に出力されます。
 
 ## 死活監視 (watchdog)
 

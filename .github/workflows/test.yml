@@ -40,3 +40,23 @@ jobs:
       - name: Audit formula
         run: |
           brew audit --strict yaskkserv2
+
+  karukan-proxy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: karukan-proxy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: karukan-proxy/go.mod
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...

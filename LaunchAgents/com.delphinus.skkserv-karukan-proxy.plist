@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.delphinus.skkserv-karukan-proxy</string>
+
+    <!-- macSKK 専用の skkserv → karukan-server のプロキシ。bin/setup が go build したバイナリを起動する。
+         待ち受けは 127.0.0.1:1179。yaskkserv2 (1178) に候補が無い読みだけを karukan-server (3000) に回す。 -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/jinnouchi.yasushi/git/github.com/delphinus/homebrew-yaskkserv2/karukan-proxy/skkserv-karukan-proxy</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- 落ちたら起こし直す。macSKK は応答が無いと skkserv を自動で無効にするので、止めたままにしない。 -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jinnouchi.yasushi/Library/Logs/skkserv-karukan-proxy.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/jinnouchi.yasushi/Library/Logs/skkserv-karukan-proxy.log</string>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+</dict>
+</plist>
