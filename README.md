@@ -31,11 +31,11 @@ brew install yaskkserv2
 | 種類 | 例 | 表すもの | どこで見るか |
 | --- | --- | --- | --- |
 | tap のバージョン | `v1.0.0` | このリポジトリ自体のバージョン。辞書の自動更新・watchdog などのスクリプトや Formula の変更をまとめたもの | git のタグと [Releases](https://github.com/delphinus/homebrew-yaskkserv2/releases) |
-| Formula のバージョン | `0.1.7_2` | Homebrew が入れる yaskkserv2 本体のバージョン | `yaskkserv2.rb` の `version` と `revision`、`brew info yaskkserv2` |
+| Formula のバージョン | `0.1.7_3` | Homebrew が入れる yaskkserv2 本体のバージョン | `yaskkserv2.rb` の `version` と `revision`、`brew info yaskkserv2` |
 
 - tap のバージョンは [Semantic Versioning](https://semver.org/lang/ja/) に従います。
 - 上流 yaskkserv2 の最後のリリースは 0.1.7 (2023 年 9 月) です。Formula は上流 master の特定のコミットに固定し、`version` は上流の `Cargo.toml` に合わせて `0.1.7` のままにしています。
-- 固定するコミットを進めたり、パッチや `service` ブロックを変えたりしたときは、`revision` を 1 つ上げます。`version` が変わらないので、`revision` を上げないと `brew upgrade` が変更を検知しません。`brew info` では `0.1.7_2` のように `_<revision>` 付きで表示されます。
+- 固定するコミットを進めたり、`service` ブロックを変えたりしたときは、`revision` を 1 つ上げます。`version` が変わらないので、`revision` を上げないと `brew upgrade` が変更を検知しません。`brew info` では `0.1.7_3` のように `_<revision>` 付きで表示されます。
 
 ## 使い方
 
@@ -254,31 +254,29 @@ brew services restart yaskkserv2   # 新しい引数で plist を再生成・再
 
 ## Google 日本語入力との連携
 
-yaskkserv2 は Google 日本語入力 API を使用して、辞書にない単語を変換することができます。
+yaskkserv2 は、辞書に無い読みを Google 日本語入力 API へ問い合わせることができます
+(上流のデフォルトは `--google-japanese-input=notfound`)。本 Formula の `service` ブロック
+では `--google-japanese-input=disable` を付けて**無効にしています**。読みを外部へ送らず、
+辞書に無い読みの変換はクライアント側 (ローカルの変換エンジン等) に任せる方針です。
+
+有効にしたい場合は、`brew services` を使わずに自分で起動してください:
 
 ```bash
 yaskkserv2 \
+  --no-daemonize \
+  --midashi-utf8 \
   --google-japanese-input=notfound \
+  --google-cache-filename=$(brew --prefix)/var/yaskkserv2/google.cache \
   $(brew --prefix)/var/yaskkserv2/dictionary.yaskkserv2
 ```
 
-詳しいオプションは `yaskkserv2 --help` を参照してください。
+`--google-cache-filename` は問い合わせた結果をキャッシュし、同じ読みの 2 回目以降の往復を
+省きます。詳しいオプションは `yaskkserv2 --help` を参照してください。
 
-### キャッシュ (`--google-cache-filename`)
-
-`--google-japanese-input=notfound` のままだと、辞書に無い読みは毎回 Google API へ
-ネットワーク往復します。本 Formula の `service` ブロックでは
-`--google-cache-filename=$(brew --prefix)/var/yaskkserv2/google.cache` を付け、
-フォールバック結果をキャッシュして 2 回目以降の同じ読みの往復を省きます。
-
-キャッシュは無制限には増えません。書き込みのたびに次の二つで刈り込まれます:
-
-- `--google-cache-entries` (既定 1024): 件数上限。超過分は最古エントリから evict。
-- `--google-cache-expire-seconds` (既定 2592000 = 30 日): これより古いエントリは除去。
-
-ファイルは追記ではなくマップ全体の上書きなので、サイズは生存エントリ数 (最大 1024 件)
-に比例します。なお排他制御は無いため、yaskkserv2 を複数起動する場合はインスタンス
-ごとに別のキャッシュファイルを指定してください。
+送りありの見出し (`かんがえr` など) も Google へ問い合わせられますが、Google は末尾の
+アルファベットを解釈できず、送りなしの候補を返します。補完のように見出しを機械的に作って
+問い合わせるクライアントでは、誤った候補が入力のたびに出ます。以前の Formula はこれを
+避けるパッチを当てていましたが、Google を無効にしたので外しました。
 
 ## アンインストール
 
