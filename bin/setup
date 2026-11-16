@@ -68,6 +68,17 @@ log "ensuring source cache dir: $VAR/sources"
 install_agent "com.delphinus.yaskkserv2-dict" "$REPO_ROOT/bin/build-dict"
 install_agent "com.delphinus.yaskkserv2-watchdog" "$REPO_ROOT/bin/yaskkserv2-watchdog"
 
+# 3b. macSKK 用の skkserv → karukan のプロキシ
+#     Go が無い Mac では飛ばす (yaskkserv2 の辞書の自動更新には要らない)。
+if have go; then
+    log "building skkserv-karukan-proxy"
+    (cd "$REPO_ROOT/karukan-proxy" && go build -o skkserv-karukan-proxy .) \
+        || die "go build failed (karukan-proxy)"
+    install_agent "com.delphinus.skkserv-karukan-proxy" "$REPO_ROOT/karukan-proxy/skkserv-karukan-proxy"
+else
+    log "WARN: go が無いので skkserv-karukan-proxy を飛ばします (brew install go のあと再実行)"
+fi
+
 # 4. 初回ビルド
 log "running initial build (bin/build-dict --force)"
 "$REPO_ROOT/bin/build-dict" --force || die "initial build failed (see ~/Library/Logs/yaskkserv2-dict.log)"
@@ -77,8 +88,10 @@ log "  - sources:  $VAR/sources"
 log "  - dict:     $VAR/dictionary.yaskkserv2"
 log "  - launchd:  com.delphinus.yaskkserv2-dict (hourly, checks upstream once a day)"
 log "  - launchd:  com.delphinus.yaskkserv2-watchdog (every 60s)"
+log "  - launchd:  com.delphinus.skkserv-karukan-proxy (127.0.0.1:1179, macSKK 用。go があるときだけ)"
 log "  - logs:     ~/Library/Logs/yaskkserv2-dict.log"
 log "              ~/Library/Logs/yaskkserv2-watchdog.log"
+log "              ~/Library/Logs/skkserv-karukan-proxy.log"
 log ""
 log "manual rebuild:   $REPO_ROOT/bin/build-dict --force"
 log "manual healthchk: $REPO_ROOT/bin/yaskkserv2-watchdog --check"
