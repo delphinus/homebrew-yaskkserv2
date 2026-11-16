@@ -7,6 +7,11 @@
 
     <key>ProgramArguments</key>
     <array>
+        <!-- Apple 署名の /bin/bash で起動する。build-dict は macSKK のサンドボックスの辞書フォルダへ
+             書き込むので TCC の許可が要り、許可はこのジョブの責任プロセスに対して記録される。
+             shebang (#!/usr/bin/env bash) に任せると Homebrew の bash になり、ad-hoc 署名なので
+             brew upgrade bash のたびに許可が外れる。/bin/bash にフルディスクアクセスを与えておく。 -->
+        <string>/bin/bash</string>
         <string>/Users/jinnouchi.yasushi/git/github.com/delphinus/homebrew-yaskkserv2/bin/build-dict</string>
     </array>
 

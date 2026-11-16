@@ -13,6 +13,9 @@
 # 指紋比較で検知するので、レシピを編集すれば次回の日次実行で自動的に反映される
 # (--force 不要)。
 #
+# 再構築したら、同じ内容を SKK-JISYO 形式 (UTF-8) で書き出して macSKK の辞書フォルダへコピーする
+# (macSKK は yaskkserv2 の辞書形式を読めず、辞書をメモリに持って引くため)。
+#
 # AquaSKK の HTTP 辞書自動更新 (SKKHttpDictionaryLoader) を置き換えるもの。
 # 個人学習辞書 (delphinus/skk-jisyo) とは別系統 — こちらは公開システム辞書専用。
 #
@@ -33,6 +36,16 @@ RECIPE_STAMP="$VAR/.recipe.sha"          # 前回ビルドに使ったレシピ�
 IDLE_THRESHOLD_SEC="${YASKK_BUILD_IDLE_THRESHOLD_SEC:-60}"
 CHECK_STAMP="$VAR/.last-check"           # 最後に上流を確認し終えた時刻 (このスクリプトが管理)
 CHECK_INTERVAL_SEC="${YASKK_BUILD_CHECK_INTERVAL_SEC:-72000}"   # 20 時間。日ごとの起動時刻のずれを吸収する
+
+# macSKK 向けの辞書。macSKK は yaskkserv2 の辞書形式を読めないので、同じ内容を SKK-JISYO 形式
+# (UTF-8) で書き出し、macSKK の辞書フォルダへコピーする。macSKK は辞書フォルダの変更を NSFilePresenter で
+# 受け取り、ファイルが差し替わると自分で読み直す。ファイル名に "utf8" を含めると、macSKK は
+# 辞書を追加したときに文字コードを UTF-8 と判定する。
+MACSKK_JISYO_NAME="SKK-JISYO.yaskkserv2.utf8"
+MACSKK_JISYO="$VAR/$MACSKK_JISYO_NAME"            # 書き出した辞書 (このスクリプトが生成)
+MACSKK_EXPORT_STAMP="$VAR/.macskk-export.sha"     # 最後に macSKK へコピーした辞書の指紋
+MACSKK_DICT_DIR="$HOME/Library/Containers/net.mtgto.inputmethod.macSKK/Data/Documents/Dictionaries"
+MACSKK_TIMEOUT_SEC="${YASKK_BUILD_MACSKK_TIMEOUT_SEC:-30}"
 
 JAWIKI_URL="https://github.com/tokuhirom/jawiki-kana-kanji-dict/releases/latest/download/SKK-JISYO.jawiki"
 JAWIKI_FILE="$SRC/SKK-JISYO.jawiki"
@@ -97,6 +110,79 @@ JISYO_FILES=(
 
 log() { printf '%s %s\n' "$(/bin/date -Iseconds)" "$*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
+
+# --- macSKK への書き出し -------------------------------------------------
+#
+# macSKK の辞書フォルダは他のアプリのサンドボックスの中なので、読み書きには TCC の許可が要る。
+# 許可は launchd ジョブの「責任プロセス」に対して記録されるため、plist は /bin/bash でこの
+# スクリプトを起動する (skk-jisyo の skk-sync と同じ。/bin/bash にフルディスクアクセスを与える)。
+#
+# 応答されない TCC のプロンプトは syscall を無期限に止めるので、辞書フォルダに触るコマンドは
+# macskk_run で時間を区切る。触るのは Apple 署名の /bin/cp と /bin/mv だけにする (コマンドごとに
+# 許可のプロンプトが出るのを避けるため)。
+
+# macskk_run コマンド... — $MACSKK_TIMEOUT_SEC を超えたら kill して 124 を返す
+macskk_run() {
+    local pid i=0
+    "$@" &
+    pid=$!
+    while (( i < MACSKK_TIMEOUT_SEC * 10 )); do
+        kill -0 "$pid" 2>/dev/null || break
+        /bin/sleep 0.1
+        i=$((i + 1))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        kill -9 "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+        return 124
+    fi
+    wait "$pid"
+}
+
+# yaskkserv2 の辞書から macSKK 向けの SKK-JISYO を書き出す。--utf8 を付けないと
+# EUC-JIS-2004 で書き出され、絵文字など EUC に無い文字が落ちる。
+write_macskk_jisyo() {
+    local tmp
+    tmp="$(mktemp "$VAR/.macskk-jisyo.XXXXXX")"
+    if ! yaskkserv2_make_dictionary --utf8 --dictionary-filename="$DICT" \
+            --output-jisyo-filename="$tmp" >/dev/null; then
+        rm -f "$tmp"
+        log "WARN: failed to write $MACSKK_JISYO_NAME"
+        return 1
+    fi
+    if [[ ! -s "$tmp" ]]; then
+        rm -f "$tmp"
+        log "WARN: written $MACSKK_JISYO_NAME is empty"
+        return 1
+    fi
+    chmod 644 "$tmp"
+    mv -f "$tmp" "$MACSKK_JISYO"
+    log "wrote: $MACSKK_JISYO ($(wc -c <"$MACSKK_JISYO" | tr -d ' ') bytes)"
+}
+
+# 書き出した辞書を macSKK の辞書フォルダへコピーする。前回コピーしたものと同じなら何もしない。
+# 一時ファイルは "." で始まる名前にする — macSKK は隠しファイルを辞書として扱わないので、
+# コピーの途中のファイルを拾われない。同じフォルダの中で mv するので差し替えは一度で済む。
+export_to_macskk() {
+    [[ -f "$MACSKK_JISYO" ]] || write_macskk_jisyo || return 0
+    if [[ ! -d "$MACSKK_DICT_DIR" ]]; then
+        # ディレクトリの有無は stat だけで分かり、TCC の許可は要らない
+        return 0   # macSKK を入れていない Mac
+    fi
+    local sha
+    sha="$(shasum -a 256 "$MACSKK_JISYO" | awk '{print $1}')"
+    if [[ "$sha" == "$(cat "$MACSKK_EXPORT_STAMP" 2>/dev/null || true)" ]]; then
+        return 0
+    fi
+    local tmp="$MACSKK_DICT_DIR/.$MACSKK_JISYO_NAME.tmp"
+    if macskk_run /bin/cp "$MACSKK_JISYO" "$tmp" 2>/dev/null \
+            && macskk_run /bin/mv -f "$tmp" "$MACSKK_DICT_DIR/$MACSKK_JISYO_NAME" 2>/dev/null; then
+        printf '%s\n' "$sha" > "$MACSKK_EXPORT_STAMP"
+        log "exported to macSKK: $MACSKK_DICT_DIR/$MACSKK_JISYO_NAME"
+    else
+        log "WARN: cannot write to macSKK dictionary dir (TCC not granted to /bin/bash, or timed out); will retry next run"
+    fi
+}
 
 # ビルドレシピ = このスクリプト自身 + normalizer + 四角号碼の合成スクリプト。辞書の並び順や
 # 正規化ロジックなど、出力に影響する「作り方」の指紋を取る。上流データが変わらなくてもレシピが変われば
@@ -233,6 +319,7 @@ fi
 
 if (( ! CHANGED )); then
     log "no upstream change; skip rebuild"
+    export_to_macskk   # 前回コピーできなかった (TCC の許可が無かった等) ときのやり直し
     /bin/date +%s > "$CHECK_STAMP"
     exit 0
 fi
@@ -344,6 +431,10 @@ restart_service() {
     fi
 }
 restart_service
+
+# --- macSKK への書き出し -------------------------------------------------
+# 失敗しても yaskkserv2 の辞書の更新は済んでいるので、ビルドは失敗にしない。
+write_macskk_jisyo && export_to_macskk
 
 /bin/date +%s > "$CHECK_STAMP"
 log "build ok"
