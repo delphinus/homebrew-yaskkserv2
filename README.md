@@ -207,6 +207,29 @@ trimeSJHM は中国の字形表に沿った独自の取り方 (新四角号码) 
 多いため、優先度を最も低くしています。4 桁しか載っていない字は 4 桁の見出しにだけ出ます。
 同じコードの候補は 1 → 2 → 3 の順に並び、2・3 で足した字は JIS X 0213 で表せる字が先に来ます。
 
+### macSKK で使う
+
+[macSKK](https://github.com/mtgto/macSKK) は yaskkserv2 の辞書形式を読めないので、`bin/build-dict` は
+再構築のたびに同じ内容を SKK-JISYO 形式 (UTF-8) で `$(brew --prefix)/var/yaskkserv2/SKK-JISYO.yaskkserv2.utf8`
+に書き出し、macSKK の辞書フォルダ
+(`~/Library/Containers/net.mtgto.inputmethod.macSKK/Data/Documents/Dictionaries/`) へコピーします。
+macSKK は辞書フォルダの変更を検知して、差し替わった辞書を自分で読み直します。
+
+- 最初の 1 回だけ、macSKK の設定の「辞書」で `SKK-JISYO.yaskkserv2.utf8` を有効にしてください。
+  ファイル名に `utf8` を含めているので、文字コードは UTF-8 と判定されます。
+- macSKK の辞書フォルダは他のアプリのサンドボックスの中なので、書き込むには
+  **システム設定 → プライバシーとセキュリティ → フルディスクアクセス に `/bin/bash` を追加**
+  する必要があります (ファイル選択ダイアログで `⌘⇧G` → `/bin/bash`)。LaunchAgent は `/bin/bash` で
+  `build-dict` を起動するので、許可はこれに対して記録されます。
+- 許可が無いとコピーだけを飛ばし、ログに `WARN: cannot write to macSKK dictionary dir` を出します。
+  yaskkserv2 の辞書の更新は止まりません。コピーは次の実行でやり直します。
+- macSKK を入れていない Mac (辞書フォルダが無い) では、コピーをしません。
+- 前回コピーした辞書と同じなら、コピーをしません (`.macskk-export.sha` で比べます)。
+
+| 環境変数 | 既定値 | 意味 |
+| --- | --- | --- |
+| `YASKK_BUILD_MACSKK_TIMEOUT_SEC` | `30` | 辞書フォルダへのコピーを打ち切るまでの秒数 (応答されない許可のプロンプトで止まらないように) |
+
 ## 死活監視 (watchdog)
 
 yaskkserv2 0.1.7 はシングルスレッドのブロッキング TCP サーバで、macOS のスリープ/復帰で
